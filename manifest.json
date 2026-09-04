@@ -1,0 +1,6 @@
+{
+  "title": "Asennus- ja rahtiluettelot",
+  "url": "https://kikoske-beep.github.io/tc-luettelot/index.html",
+  "description": "Muodostaa asennus- ja rahtiluettelot teräsrakenteen IFC-kokoonpanoista, järjestettävissä asennusjärjestykseen",
+  "extensionType": ["3dviewer"]
+}

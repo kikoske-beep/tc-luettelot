@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trutec – Asennus- ja rahtiluettelot</title>
+<script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<style>
+  :root{ --blue:#005f9e; --blue-d:#004a7c; --line:#e2e5ea; --bg:#f5f6f8; --ok:#1a7f37; --warn:#b35900; --red:#c0392b; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{ font-family:"Segoe UI",system-ui,sans-serif; color:#1c2126; background:var(--bg); font-size:13px; }
+  header{ background:var(--blue); color:#fff; padding:10px 14px; font-weight:600; font-size:15px; display:flex; align-items:center; gap:10px; }
+  header small{ font-weight:400; opacity:.85; }
+  .wrap{ padding:12px; }
+  .panel{ background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .panel h2{ margin:0 0 10px; font-size:13px; color:var(--blue); text-transform:uppercase; letter-spacing:.03em; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; }
+  label.fld{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:#556; }
+  select,input[type=number]{ padding:7px 8px; border:1px solid #c7ccd4; border-radius:6px; font-size:13px; background:#fff; width:100%; }
+  .btn{ background:var(--blue); color:#fff; border:none; border-radius:6px; padding:9px 16px; font-size:13px; cursor:pointer; font-weight:600; }
+  .btn:hover{ background:var(--blue-d); }
+  .btn.sec{ background:#eef1f5; color:#2a2f36; border:1px solid #d3d8df; font-weight:500; }
+  .btn.sec:hover{ background:#e3e8ef; }
+  .btn.big{ font-size:14px; padding:11px 20px; }
+  .btn.cap-on{ background:var(--red); }
+  .btn.cap-on:hover{ background:#a5311f; }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .row-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .tabs{ display:flex; gap:4px; border-bottom:2px solid var(--line); margin-bottom:12px; }
+  .tab{ padding:9px 16px; cursor:pointer; border:none; background:none; font-size:13px; font-weight:600; color:#6b7280; border-bottom:2px solid transparent; margin-bottom:-2px; }
+  .tab.active{ color:var(--blue); border-bottom-color:var(--blue); }
+  table{ border-collapse:collapse; width:100%; font-size:12.5px; }
+  th,td{ border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; white-space:nowrap; }
+  th{ background:#fafbfc; user-select:none; position:sticky; top:0; }
+  th.num,td.num{ text-align:right; }
+  tbody tr:hover{ background:#f2f7fb; }
+  tr.dragging{ opacity:.4; }
+  tr.dragover td{ box-shadow:inset 0 2px 0 var(--blue); }
+  .drag{ cursor:grab; color:#9aa2ad; width:22px; text-align:center; }
+  .seqno{ font-weight:700; color:var(--blue); }
+  .mini{ padding:3px 7px; font-size:11px; border-radius:5px; border:1px solid #cfd5dd; background:#fff; cursor:pointer; }
+  .mini:hover{ background:#eef4fa; border-color:var(--blue); color:var(--blue); }
+  .mini.del:hover{ background:#fdecea; border-color:var(--red); color:var(--red); }
+  .acts{ display:flex; gap:4px; }
+  .load-in{ width:64px; padding:4px 6px; text-align:right; }
+  tfoot td{ font-weight:700; background:#f7f9fb; border-top:2px solid #d6dbe2; }
+  .tablewrap{ max-height:50vh; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  #status{ font-size:12px; color:#667; margin-top:10px; min-height:16px; }
+  .status-ok{ color:var(--ok); } .status-warn{ color:var(--warn); }
+  .pill{ display:inline-block; background:#eef4fa; color:var(--blue); border-radius:20px; padding:2px 10px; font-size:12px; }
+  .empty{ padding:26px; text-align:center; color:#8a929c; }
+  .hint{ color:#788; font-size:11.5px; margin:8px 0 4px; }
+  @media print{
+    header,.panel.controls,.tabs .tab:not(.active),.row-actions,.drag,.col3d,.actcol,.no-print{ display:none !important; }
+    .tablewrap{ max-height:none; border:none; overflow:visible; } th{ position:static; }
+    body{ background:#fff; } .wrap{ padding:0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  Trutec – Asennus- &amp; rahtiluettelot
+  <small id="projname"></small>
+</header>
+
+<div class="wrap">
+  <!-- OHJAUS -->
+  <div class="panel controls">
+    <h2>Poiminta mallista</h2>
+    <div class="row-actions">
+      <button class="btn big" id="capBtn">Aloita poiminta mallista</button>
+      <span class="pill" id="countPill">0 kokoonpanoa</span>
+      <span style="flex:1"></span>
+      <button class="btn sec" id="undoBtn" title="Poista viimeksi lisätty">↶ Kumoa viimeinen</button>
+      <button class="btn sec" id="clearBtn">Tyhjennä lista</button>
+    </div>
+
+    <div class="grid" id="mapGrid" style="margin-top:12px;display:none">
+      <label class="fld">Tunnus (asennusjärjestyksen peruste)
+        <select id="fMark"></select>
+      </label>
+      <label class="fld">Paino
+        <select id="fWeight"></select>
+      </label>
+      <label class="fld">Profiili
+        <select id="fProfile"></select>
+      </label>
+      <label class="fld">Materiaali
+        <select id="fMaterial"></select>
+      </label>
+      <label class="fld">Pituus
+        <select id="fLength"></select>
+      </label>
+    </div>
+    <div id="status">Avaa 3D-malli. Paina "Aloita poiminta" ja klikkaa kokoonpanoja siinä järjestyksessä kuin ne asennetaan.</div>
+  </div>
+
+  <!-- VÄLILEHDET -->
+  <div class="tabs">
+    <button class="tab active" data-tab="asennus">Asennusjärjestys</button>
+    <button class="tab" data-tab="rahti">Rahtiluettelo</button>
+  </div>
+
+  <!-- ASENNUSJÄRJESTYS -->
+  <div class="panel" id="tab-asennus">
+    <div class="row-actions">
+      <span class="pill" id="asCount">0 riviä</span>
+      <span style="flex:1"></span>
+      <button class="btn sec" id="csvAs">Vie CSV</button>
+      <button class="btn sec" id="xlsAs">Vie Excel</button>
+      <button class="btn sec" id="printAs">Tulosta / PDF</button>
+    </div>
+    <p class="hint no-print">Rivit ovat poimintajärjestyksessä. Säädä järjestystä ▲▼-napeilla tai raahaamalla ⠿-kahvasta. "3D" korostaa kokoonpanon mallissa, "✕" poistaa rivin.</p>
+    <div class="tablewrap">
+      <table id="tblAs">
+        <thead>
+          <tr>
+            <th class="no-print"></th>
+            <th class="num">Nro</th>
+            <th>Tunnus</th>
+            <th>Profiili</th>
+            <th>Materiaali</th>
+            <th class="num">Pituus (mm)</th>
+            <th class="num">Paino (kg)</th>
+            <th class="no-print actcol"></th>
+          </tr>
+        </thead>
+        <tbody id="bodyAs"><tr><td colspan="8" class="empty">Ei vielä poimintoja.</td></tr></tbody>
+        <tfoot id="footAs"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- RAHTI -->
+  <div class="panel" id="tab-rahti" style="display:none">
+    <div class="row-actions">
+      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">
+        Painoraja / kuorma (kg)
+        <input type="number" id="maxLoad" value="24000" min="1" style="width:110px" />
+      </label>
+      <button class="btn" id="packBtn">Jaottele kuormiin</button>
+      <button class="btn sec" id="clearLoads">Tyhjennä kuormat</button>
+      <span style="flex:1"></span>
+      <button class="btn sec" id="csvRa">Vie CSV</button>
+      <button class="btn sec" id="xlsRa">Vie Excel</button>
+      <button class="btn sec" id="printRa">Tulosta / PDF</button>
+    </div>
+    <p class="hint no-print">Automaattijako täyttää kuormat asennusjärjestyksessä painorajaan asti. Kuorman numeron voi myös kirjoittaa käsin.</p>
+    <div class="tablewrap">
+      <table id="tblRa">
+        <thead>
+          <tr>
+            <th class="num">Kuorma</th>
+            <th class="num">Nro</th>
+            <th>Tunnus</th>
+            <th>Profiili</th>
+            <th class="num">Paino (kg)</th>
+            <th class="no-print col3d"></th>
+          </tr>
+        </thead>
+        <tbody id="bodyRa"><tr><td colspan="6" class="empty">Ei vielä poimintoja.</td></tr></tbody>
+      </table>
+    </div>
+    <h2 style="margin:16px 0 8px;color:var(--blue)">Kuormien yhteenveto</h2>
+    <div class="tablewrap" style="max-height:28vh">
+      <table id="tblSum">
+        <thead><tr><th class="num">Kuorma</th><th class="num">Kokoonpanoja (kpl)</th><th class="num">Paino (kg)</th></tr></thead>
+        <tbody id="bodySum"><tr><td colspan="3" class="empty">—</td></tr></tbody>
+        <tfoot id="footSum"></tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ===================== Workspace API ===================== */
+let API = null;
+let capture = false;       // poimintatila päällä?
+let programmatic = false;  // oma valinta käynnissä -> ohita tapahtuma
+const els = id => document.getElementById(id);
+const setStatus = (m,c) => { const s=els('status'); s.textContent=m; s.className = c?'status-'+c:''; };
+
+async function connect(){
+  try{
+    API = await TrimbleConnectWorkspace.connect(window.parent, onEvent, 30000);
+    try{ const p = await API.project.getCurrentProject(); if(p&&p.name) els('projname').textContent = '— '+p.name; }catch(e){}
+    setStatus('Yhteys muodostettu. Paina "Aloita poiminta" ja klikkaa kokoonpanoja mallista.','ok');
+  }catch(e){
+    setStatus('Yhteyttä ei saatu: '+e+'. Avaa työkalu Trimble Connectin 3D-katselussa.','warn');
+  }
+}
+
+async function onEvent(event, args){
+  if(event === 'viewer.onSelectionChanged'){
+    if(!capture || programmatic) return;
+    try{ await onPick(); }catch(e){ console.warn(e); }
+  }
+}
+
+/* ===================== Ydinlogiikka (testattu) ===================== */
+const collator = new Intl.Collator('fi',{ numeric:true, sensitivity:'base' });
+const naturalCompare = (a,b) => collator.compare(String(a??''), String(b??''));
+function num(v){ if(v==null) return NaN; if(typeof v==='number') return v; const s=String(v).replace(',', '.').replace(/[^0-9.\-]/g,''); const f=parseFloat(s); return isNaN(f)?NaN:f; }
+function flattenProps(o){ const f=[]; (o.properties||[]).forEach(ps=>(ps.properties||[]).forEach(p=>f.push({ name:p.name, value:p.value }))); return f; }
+function findProp(flat, cands){ const lc=flat.map(f=>({v:f.value, ln:String(f.name).toLowerCase()})); for(const c of cands){ const cl=c.toLowerCase(); const h=lc.find(f=>f.ln===cl); if(h) return h.v; } for(const c of cands){ const cl=c.toLowerCase(); const h=lc.find(f=>f.ln.includes(cl)); if(h) return h.v; } return undefined; }
+function fmt(v){ return (typeof v==='number' && isFinite(v)) ? v.toLocaleString('fi-FI',{maximumFractionDigits:1}) : (v??''); }
+function isAssembly(p){ return p && p.class && /ELEMENTASSEMBLY/i.test(String(p.class).replace(/\s/g,'')); }
+
+const DEFAULTS = {
+  mark:   ['Assembly/Cast unit Mark','Assembly Mark','AssemblyMark','ASSEMBLY_POS','Assembly Position','Cast unit Mark','Cast Unit Mark','Position','Pos','Mark'],
+  weight: ['Gross weight','GrossWeight','GROSS_WEIGHT','Net weight','NetWeight','Weight','WEIGHT','Mass','Paino'],
+  profile:['Profile','PROFILE','Section','Cross section','Cross-section','Profiili'],
+  material:['Material','MATERIAL','Grade','Steel grade','Materiaali','Laatu'],
+  length: ['Length','LENGTH','Cut length','Nettopituus','Pituus'],
+};
+
+/* ===================== Tila ===================== */
+let RAW = [];                 // poimitut kokoonpanot järjestyksessä (ObjectProperties + __modelId,__load,__keys)
+let ROWS = [];                // johdetut näyttörivit
+const addedKeys = new Set();  // estää duplikaatit
+let selectorsInit = false;
+
+/* ===================== Poiminta ===================== */
+async function toggleCapture(){
+  if(!API){ setStatus('Ei yhteyttä Trimble Connectiin.','warn'); return; }
+  capture = !capture;
+  const btn = els('capBtn');
+  if(capture){
+    programmatic = true;
+    try{ await API.viewer.setSettings({ assemblySelection:true }); }catch(e){}
+    setTimeout(()=>{ programmatic=false; }, 400);
+    btn.textContent = '● Poiminta käynnissä – lopeta';
+    btn.classList.add('cap-on');
+    setStatus('Poiminta päällä. Klikkaa kokoonpanoja mallista asennusjärjestyksessä.','ok');
+  }else{
+    btn.textContent = 'Aloita poiminta mallista';
+    btn.classList.remove('cap-on');
+    try{ await API.viewer.setSettings({ assemblySelection:false }); }catch(e){}
+    setStatus(`Poiminta pysäytetty. Listassa ${RAW.length} kokoonpanoa.`);
+  }
+}
+
+function normalizeSelection(sel){
+  if(!sel) return [];
+  const arr = Array.isArray(sel) ? sel : [sel];
+  return arr.map(s=>({
+    modelId: s.modelId || s.modelID || s.model,
+    ids: (s.objectRuntimeIds || s.runtimeIds || s.objects || s.ids || []).map(x => (typeof x==='object' ? x.id : x))
+  })).filter(m=>m.modelId && m.ids && m.ids.length);
+}
+
+async function resolveAssembly(modelId, id){
+  let props;
+  try{ const arr = await API.viewer.getObjectProperties(modelId, [id]); props = arr && arr[0]; }catch(e){}
+  if(!props) return null;
+  if(isAssembly(props)) return { id, props };
+  // Varakeino: nouse hierarkiassa kokoonpanoon (jos osa valittu)
+  try{
+    const parents = await API.viewer.getHierarchyParents(modelId, [id], undefined, true);
+    for(const par of (parents||[])){
+      const pid = (par && (par.id ?? par.entityId ?? par.runtimeId));
+      if(pid==null) continue;
+      const parr = await API.viewer.getObjectProperties(modelId, [pid]);
+      const pp = parr && parr[0];
+      if(pp && isAssembly(pp)) return { id:pid, props:pp };
+    }
+  }catch(e){}
+  return { id, props }; // fallback: käytä valittua objektia sellaisenaan
+}
+
+async function onPick(){
+  const sel = await API.viewer.getSelection();
+  const norm = normalizeSelection(sel);
+  const fresh = [];
+  for(const m of norm) for(const id of m.ids){
+    const key = m.modelId + '|' + id;
+    if(addedKeys.has(key)) continue;
+    addedKeys.add(key);
+    fresh.push({ modelId:m.modelId, id, key });
+  }
+  if(!fresh.length) return;
+  setStatus('Haetaan valitun kokoonpanon tiedot…');
+  let added = 0;
+  for(const p of fresh){
+    const asm = await resolveAssembly(p.modelId, p.id);
+    if(!asm) continue;
+    const akey = p.modelId + '|A|' + asm.id;
+    if(addedKeys.has(akey)) continue; // sama kokoonpano jo listassa
+    addedKeys.add(akey);
+    const o = asm.props;
+    o.__modelId = p.modelId;
+    o.__load = '';
+    o.__keys = [p.key, akey];
+    RAW.push(o);
+    added++;
+  }
+  if(added){ mergeSelectors(); deriveRows(); render(); setStatus(`Poimittu ${RAW.length} kokoonpanoa (asennusjärjestys).`,'ok'); }
+}
+
+/* ===================== Kenttävalinnat ===================== */
+function mergeSelectors(){
+  const names = new Set();
+  RAW.forEach(o => flattenProps(o).forEach(f => names.add(f.name)));
+  const sorted = [...names].sort(naturalCompare);
+  const fill = (selId, defaults) => {
+    const sel = els(selId);
+    const prev = sel.value;
+    sel.innerHTML = '';
+    const none = document.createElement('option'); none.value=''; none.textContent='— (ei mitään)'; sel.appendChild(none);
+    sorted.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+    if(!selectorsInit){
+      let pick=''; for(const d of defaults){ const e=sorted.find(n=>n.toLowerCase()===d.toLowerCase()); if(e){pick=e;break;} }
+      if(!pick) for(const d of defaults){ const c=sorted.find(n=>n.toLowerCase().includes(d.toLowerCase())); if(c){pick=c;break;} }
+      sel.value = pick;
+    }else{
+      sel.value = sorted.includes(prev) ? prev : '';
+    }
+  };
+  fill('fMark', DEFAULTS.mark);
+  fill('fWeight', DEFAULTS.weight);
+  fill('fProfile', DEFAULTS.profile);
+  fill('fMaterial', DEFAULTS.material);
+  fill('fLength', DEFAULTS.length);
+  selectorsInit = true;
+  els('mapGrid').style.display = 'grid';
+}
+function currentMap(){
+  const one = v => v ? [v] : ['\u0000none'];
+  return { mark:one(els('fMark').value), weight:one(els('fWeight').value), profile:one(els('fProfile').value), material:one(els('fMaterial').value), length:one(els('fLength').value) };
+}
+
+/* ===================== Rivien johtaminen ===================== */
+function deriveRows(){
+  const map = currentMap();
+  ROWS = RAW.map((o,i)=>{
+    const flat = flattenProps(o);
+    const markRaw = findProp(flat, map.mark);
+    return {
+      seq: i+1,
+      mark: (markRaw==null||markRaw==='') ? '(ei tunnusta)' : String(markRaw),
+      profile: findProp(flat, map.profile) ?? '',
+      material: findProp(flat, map.material) ?? '',
+      length: findProp(flat, map.length) ?? '',
+      weight: +(num(findProp(flat, map.weight)) || 0).toFixed(1),
+      load: o.__load ?? '',
+      ref: { modelId:o.__modelId, id:o.id }
+    };
+  });
+}
+
+/* ===================== Renderöinti ===================== */
+function render(){ renderAsennus(); renderRahti(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; }
+
+function renderAsennus(){
+  const tb = els('bodyAs');
+  if(!ROWS.length){ tb.innerHTML='<tr><td colspan="8" class="empty">Ei vielä poimintoja.</td></tr>'; els('footAs').innerHTML=''; els('asCount').textContent='0 riviä'; return; }
+  tb.innerHTML='';
+  ROWS.forEach((r, idx)=>{
+    const tr = document.createElement('tr');
+    tr.draggable = true; tr.dataset.idx = idx;
+    tr.innerHTML =
+      `<td class="drag no-print" title="Raahaa">⠿</td>`+
+      `<td class="num seqno">${r.seq}</td>`+
+      `<td>${escapeHtml(r.mark)}</td>`+
+      `<td>${escapeHtml(r.profile)}</td>`+
+      `<td>${escapeHtml(r.material)}</td>`+
+      `<td class="num">${fmt(num(r.length))}</td>`+
+      `<td class="num">${fmt(r.weight)}</td>`+
+      `<td class="no-print actcol"><div class="acts">`+
+        `<button class="mini" data-up="${idx}" title="Ylös">▲</button>`+
+        `<button class="mini" data-down="${idx}" title="Alas">▼</button>`+
+        `<button class="mini" data-3d="${idx}" title="Näytä 3D:ssä">3D</button>`+
+        `<button class="mini del" data-del="${idx}" title="Poista">✕</button>`+
+      `</div></td>`;
+    tb.appendChild(tr);
+  });
+  const totKg = ROWS.reduce((s,r)=>s+(r.weight||0),0);
+  els('footAs').innerHTML = `<tr><td class="no-print"></td><td></td><td>Yhteensä ${ROWS.length} kpl</td><td></td><td></td><td></td><td class="num">${fmt(+totKg.toFixed(1))}</td><td class="no-print"></td></tr>`;
+  els('asCount').textContent = `${ROWS.length} riviä`;
+  wireAsennus();
+}
+
+function renderRahti(){
+  const tb = els('bodyRa');
+  if(!ROWS.length){ tb.innerHTML='<tr><td colspan="6" class="empty">Ei vielä poimintoja.</td></tr>'; els('bodySum').innerHTML='<tr><td colspan="3" class="empty">—</td></tr>'; els('footSum').innerHTML=''; return; }
+  tb.innerHTML='';
+  ROWS.forEach((r, idx)=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td class="num"><input class="load-in" type="number" min="1" value="${r.load||''}" data-load="${idx}"></td>`+
+      `<td class="num seqno">${r.seq}</td>`+
+      `<td>${escapeHtml(r.mark)}</td>`+
+      `<td>${escapeHtml(r.profile)}</td>`+
+      `<td class="num">${fmt(r.weight)}</td>`+
+      `<td class="no-print col3d"><button class="mini" data-3d="${idx}">3D</button></td>`;
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('input[data-load]').forEach(inp=> inp.addEventListener('change', ()=>{ RAW[+inp.dataset.load].__load = inp.value ? +inp.value : ''; deriveRows(); renderSummary(); }));
+  tb.querySelectorAll('button[data-3d]').forEach(b=> b.addEventListener('click', ()=> select3D(ROWS[+b.dataset['3d']])));
+  renderSummary();
+}
+
+function renderSummary(){
+  const map = {};
+  ROWS.forEach(r=>{ if(r.load==='' || r.load==null) return; (map[r.load] ??= {pcs:0,kg:0}); map[r.load].pcs++; map[r.load].kg += (r.weight||0); });
+  const keys = Object.keys(map).map(Number).sort((a,b)=>a-b);
+  const sb = els('bodySum');
+  if(!keys.length){ sb.innerHTML='<tr><td colspan="3" class="empty">Ei kuormia. Käytä "Jaottele kuormiin" tai syötä kuorman numero.</td></tr>'; els('footSum').innerHTML=''; return; }
+  sb.innerHTML = keys.map(k=>`<tr><td class="num">${k}</td><td class="num">${map[k].pcs}</td><td class="num">${fmt(+map[k].kg.toFixed(1))}</td></tr>`).join('');
+  const tPcs = keys.reduce((s,k)=>s+map[k].pcs,0), tKg = keys.reduce((s,k)=>s+map[k].kg,0);
+  els('footSum').innerHTML = `<tr><td class="num">${keys.length} kuormaa</td><td class="num">${tPcs}</td><td class="num">${fmt(+tKg.toFixed(1))}</td></tr>`;
+}
+
+/* ===================== Vuorovaikutus ===================== */
+function wireAsennus(){
+  const tb = els('bodyAs');
+  tb.querySelectorAll('button[data-up]').forEach(b=> b.addEventListener('click', ()=> moveRow(+b.dataset.up, -1)));
+  tb.querySelectorAll('button[data-down]').forEach(b=> b.addEventListener('click', ()=> moveRow(+b.dataset.down, +1)));
+  tb.querySelectorAll('button[data-del]').forEach(b=> b.addEventListener('click', ()=> removeRow(+b.dataset.del)));
+  tb.querySelectorAll('button[data-3d]').forEach(b=> b.addEventListener('click', ()=> select3D(ROWS[+b.dataset['3d']])));
+  // raahaus
+  let dragIdx = null;
+  tb.querySelectorAll('tr').forEach(tr=>{
+    tr.addEventListener('dragstart', e=>{ dragIdx=+tr.dataset.idx; tr.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+    tr.addEventListener('dragend', ()=>{ tr.classList.remove('dragging'); tb.querySelectorAll('tr').forEach(t=>t.classList.remove('dragover')); });
+    tr.addEventListener('dragover', e=>{ e.preventDefault(); tr.classList.add('dragover'); });
+    tr.addEventListener('dragleave', ()=> tr.classList.remove('dragover'));
+    tr.addEventListener('drop', e=>{ e.preventDefault(); const to=+tr.dataset.idx; if(dragIdx==null||dragIdx===to) return; const [m]=RAW.splice(dragIdx,1); RAW.splice(to,0,m); deriveRows(); render(); });
+  });
+}
+function moveRow(idx, dir){
+  const to = idx+dir; if(to<0||to>=RAW.length) return;
+  const [m]=RAW.splice(idx,1); RAW.splice(to,0,m); deriveRows(); render();
+}
+function removeRow(idx){
+  const o = RAW[idx]; if(o && o.__keys) o.__keys.forEach(k=>addedKeys.delete(k));
+  RAW.splice(idx,1); deriveRows(); render();
+  setStatus(`Poistettu rivi. Listassa ${RAW.length} kokoonpanoa.`);
+}
+async function select3D(row){
+  if(!API || !row) return;
+  programmatic = true;
+  try{
+    const modelObjectIds = [{ modelId:row.ref.modelId, objectRuntimeIds:[row.ref.id] }];
+    await API.viewer.setSelection({ modelObjectIds }, 'set');
+    try{ await API.viewer.setCamera({ modelObjectIds }); }catch(e){}
+  }catch(e){ setStatus('3D-korostus epäonnistui: '+e,'warn'); }
+  setTimeout(()=>{ programmatic=false; }, 400);
+}
+function autoPack(maxWeight){
+  let load=1, cur=0;
+  RAW.forEach(o=>{
+    const w = num(findProp(flattenProps(o), currentMap().weight)) || 0;
+    if(cur>0 && cur+w>maxWeight){ load++; cur=0; }
+    cur += w; o.__load = load;
+  });
+  deriveRows(); render();
+}
+
+/* ===================== Vienti ===================== */
+function download(name, text, mime){
+  const blob = new Blob([text], { type: mime||'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 500);
+}
+const COLS_AS = [
+  {key:'seq',label:'Nro'},{key:'mark',label:'Tunnus'},{key:'profile',label:'Profiili'},
+  {key:'material',label:'Materiaali'},{key:'length',label:'Pituus (mm)'},{key:'weight',label:'Paino (kg)'}
+];
+const COLS_RA = [
+  {key:'load',label:'Kuorma'},{key:'seq',label:'Nro'},{key:'mark',label:'Tunnus'},
+  {key:'profile',label:'Profiili'},{key:'weight',label:'Paino (kg)'}
+];
+function toCsv(rows, columns, sep=';'){
+  const fnum = v => (typeof v==='number') ? String(v).replace('.', ',') : v;
+  const esc = v => { v=(v==null)?'':String(fnum(v)); return /[";\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
+  return '\uFEFF' + columns.map(c=>esc(c.label)).join(sep) + '\r\n' + rows.map(r=>columns.map(c=>esc(r[c.key])).join(sep)).join('\r\n');
+}
+function rahtiRows(){
+  const withLoad = ROWS.filter(r=>r.load!=='' && r.load!=null);
+  const base = withLoad.length ? withLoad.slice().sort((a,b)=>(a.load-b.load)||(a.seq-b.seq)) : ROWS;
+  return base;
+}
+function exportCsv(which){
+  if(!ROWS.length) return;
+  if(which==='as') download('asennusjarjestys.csv', toCsv(ROWS, COLS_AS), 'text/csv;charset=utf-8');
+  else download('rahtiluettelo.csv', toCsv(rahtiRows(), COLS_RA), 'text/csv;charset=utf-8');
+}
+let XLSX_READY=null;
+function loadXLSX(){ if(window.XLSX) return Promise.resolve(true); if(XLSX_READY) return XLSX_READY; XLSX_READY=new Promise(res=>{ const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s); }); return XLSX_READY; }
+async function exportXlsx(which){
+  if(!ROWS.length) return;
+  const ok = await loadXLSX();
+  if(!ok || !window.XLSX){ setStatus('Excel-kirjaston lataus epäonnistui, viedään CSV.','warn'); exportCsv(which); return; }
+  const cols = which==='as' ? COLS_AS : COLS_RA;
+  const rows = which==='as' ? ROWS : rahtiRows();
+  const aoa = [ cols.map(c=>c.label), ...rows.map(r=>cols.map(c=>{ const v=r[c.key]; return (typeof v==='number')?v:(v??''); })) ];
+  const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, which==='as'?'Asennusjärjestys':'Rahtiluettelo');
+  window.XLSX.writeFile(wb, which==='as'?'asennusjarjestys.xlsx':'rahtiluettelo.xlsx');
+}
+function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+
+/* ===================== Kytkennät ===================== */
+els('capBtn').addEventListener('click', toggleCapture);
+els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
+els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
+['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); }));
+els('packBtn').addEventListener('click', ()=>{ autoPack(num(els('maxLoad').value)||24000); });
+els('clearLoads').addEventListener('click', ()=>{ RAW.forEach(o=>o.__load=''); deriveRows(); render(); });
+els('csvAs').addEventListener('click', ()=>exportCsv('as'));
+els('csvRa').addEventListener('click', ()=>exportCsv('ra'));
+els('xlsAs').addEventListener('click', ()=>exportXlsx('as'));
+els('xlsRa').addEventListener('click', ()=>exportXlsx('ra'));
+els('printAs').addEventListener('click', ()=>{ showTab('asennus'); setTimeout(()=>window.print(),120); });
+els('printRa').addEventListener('click', ()=>{ showTab('rahti'); setTimeout(()=>window.print(),120); });
+document.querySelectorAll('.tab').forEach(t=> t.addEventListener('click', ()=> showTab(t.dataset.tab)));
+function showTab(name){
+  document.querySelectorAll('.tab').forEach(t=> t.classList.toggle('active', t.dataset.tab===name));
+  els('tab-asennus').style.display = name==='asennus' ? 'block':'none';
+  els('tab-rahti').style.display   = name==='rahti'   ? 'block':'none';
+}
+
+connect();
+</script>
+</body>
+</html>
