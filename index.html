@@ -37,6 +37,8 @@
   tbody tr:hover{ background:#f2f7fb; }
   tr.dragging{ opacity:.4; }
   tr.dragover td{ box-shadow:inset 0 2px 0 var(--blue); }
+  tbody tr.active-row td{ background:#fff3cd !important; }
+  tbody tr.active-row td:first-child{ box-shadow:inset 4px 0 0 var(--warn); }
   .drag{ cursor:grab; color:#9aa2ad; width:22px; text-align:center; }
   .seqno{ font-weight:700; color:var(--blue); }
   .mini{ padding:3px 7px; font-size:11px; border-radius:5px; border:1px solid #cfd5dd; background:#fff; cursor:pointer; }
@@ -55,6 +57,7 @@
     header,.panel.controls,.tabs .tab:not(.active),.row-actions,.drag,.col3d,.actcol,.no-print{ display:none !important; }
     .tablewrap{ max-height:none; border:none; overflow:visible; } th{ position:static; }
     body{ background:#fff; } .wrap{ padding:0; }
+    tbody tr.active-row td{ background:#fff !important; box-shadow:none !important; }
   }
 </style>
 </head>
@@ -206,7 +209,7 @@ const naturalCompare = (a,b) => collator.compare(String(a??''), String(b??''));
 function num(v){ if(v==null) return NaN; if(typeof v==='number') return v; const s=String(v).replace(',', '.').replace(/[^0-9.\-]/g,''); const f=parseFloat(s); return isNaN(f)?NaN:f; }
 function flattenProps(o){ const f=[]; (o.properties||[]).forEach(ps=>(ps.properties||[]).forEach(p=>f.push({ name:p.name, value:p.value }))); return f; }
 function findProp(flat, cands){ const lc=flat.map(f=>({v:f.value, ln:String(f.name).toLowerCase()})); for(const c of cands){ const cl=c.toLowerCase(); const h=lc.find(f=>f.ln===cl); if(h) return h.v; } for(const c of cands){ const cl=c.toLowerCase(); const h=lc.find(f=>f.ln.includes(cl)); if(h) return h.v; } return undefined; }
-function fmt(v){ return (typeof v==='number' && isFinite(v)) ? v.toLocaleString('fi-FI',{maximumFractionDigits:1}) : (v??''); }
+function fmt(v){ if(typeof v==='number') return isFinite(v) ? v.toLocaleString('fi-FI',{maximumFractionDigits:1}) : ''; return (v==null) ? '' : v; }
 function isAssembly(p){ return p && p.class && /ELEMENTASSEMBLY/i.test(String(p.class).replace(/\s/g,'')); }
 
 const DEFAULTS = {
@@ -222,6 +225,7 @@ let RAW = [];                 // poimitut kokoonpanot järjestyksessä (ObjectPr
 let ROWS = [];                // johdetut näyttörivit
 const addedKeys = new Set();  // estää duplikaatit
 let selectorsInit = false;
+let activeRefKey = null;      // korostetun rivin tunniste (modelId|id)
 
 /* ===================== Poiminta ===================== */
 async function toggleCapture(){
@@ -352,7 +356,7 @@ function deriveRows(){
 }
 
 /* ===================== Renderöinti ===================== */
-function render(){ renderAsennus(); renderRahti(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; }
+function render(){ renderAsennus(); renderRahti(); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; }
 
 function renderAsennus(){
   const tb = els('bodyAs');
@@ -360,7 +364,9 @@ function renderAsennus(){
   tb.innerHTML='';
   ROWS.forEach((r, idx)=>{
     const tr = document.createElement('tr');
-    tr.draggable = true; tr.dataset.idx = idx;
+    const rowKey = r.ref.modelId + '|' + r.ref.id;
+    tr.draggable = true; tr.dataset.idx = idx; tr.dataset.key = rowKey;
+    if(rowKey === activeRefKey) tr.classList.add('active-row');
     tr.innerHTML =
       `<td class="drag no-print" title="Raahaa">⠿</td>`+
       `<td class="num seqno">${r.seq}</td>`+
@@ -389,6 +395,9 @@ function renderRahti(){
   tb.innerHTML='';
   ROWS.forEach((r, idx)=>{
     const tr = document.createElement('tr');
+    const rowKey = r.ref.modelId + '|' + r.ref.id;
+    tr.dataset.key = rowKey;
+    if(rowKey === activeRefKey) tr.classList.add('active-row');
     tr.innerHTML =
       `<td class="num"><input class="load-in" type="number" min="1" value="${r.load||''}" data-load="${idx}"></td>`+
       `<td class="num seqno">${r.seq}</td>`+
@@ -440,8 +449,15 @@ function removeRow(idx){
   RAW.splice(idx,1); deriveRows(); render();
   setStatus(`Poistettu rivi. Listassa ${RAW.length} kokoonpanoa.`);
 }
+function highlightActive(){
+  document.querySelectorAll('#bodyAs tr, #bodyRa tr').forEach(tr=>{
+    tr.classList.toggle('active-row', !!tr.dataset.key && tr.dataset.key === activeRefKey);
+  });
+}
 async function select3D(row){
   if(!API || !row) return;
+  activeRefKey = row.ref.modelId + '|' + row.ref.id;   // merkitse rivi korostetuksi
+  highlightActive();
   programmatic = true;
   try{
     const modelObjectIds = [{ modelId:row.ref.modelId, objectRuntimeIds:[row.ref.id] }];
