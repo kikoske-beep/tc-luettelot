@@ -109,12 +109,13 @@
   <div class="panel" id="tab-asennus">
     <div class="row-actions">
       <span class="pill" id="asCount">0 riviä</span>
+      <button class="btn sec" id="clearSel">Tyhjennä korostus</button>
       <span style="flex:1"></span>
       <button class="btn sec" id="csvAs">Vie CSV</button>
       <button class="btn sec" id="xlsAs">Vie Excel</button>
       <button class="btn sec" id="printAs">Tulosta / PDF</button>
     </div>
-    <p class="hint no-print">Rivit ovat poimintajärjestyksessä. Säädä järjestystä ▲▼-napeilla tai raahaamalla ⠿-kahvasta. "3D" korostaa kokoonpanon mallissa, "✕" poistaa rivin.</p>
+    <p class="hint no-print">Rivit ovat poimintajärjestyksessä. Klikkaa riviä korostaaksesi kokoonpanon mallissa — Ctrl-klikkaus lisää valintaan, Shift-klikkaus valitsee välin. Säädä järjestystä ▲▼-napeilla tai raahaamalla ⠿-kahvasta, "3D" zoomaa kokoonpanoon, "✕" poistaa rivin.</p>
     <div class="tablewrap">
       <table id="tblAs">
         <thead>
@@ -225,7 +226,8 @@ let RAW = [];                 // poimitut kokoonpanot järjestyksessä (ObjectPr
 let ROWS = [];                // johdetut näyttörivit
 const addedKeys = new Set();  // estää duplikaatit
 let selectorsInit = false;
-let activeRefKey = null;      // korostetun rivin tunniste (modelId|id)
+let selectedKeys = new Set(); // korostettujen rivien tunnisteet (modelId|id)
+let anchorKey = null;         // Shift-valinnan ankkuri
 
 /* ===================== Poiminta ===================== */
 async function toggleCapture(){
@@ -356,7 +358,7 @@ function deriveRows(){
 }
 
 /* ===================== Renderöinti ===================== */
-function render(){ renderAsennus(); renderRahti(); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; }
+function render(){ renderAsennus(); renderRahti(); attachRowClicks(els('bodyAs')); attachRowClicks(els('bodyRa')); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; }
 
 function renderAsennus(){
   const tb = els('bodyAs');
@@ -366,7 +368,7 @@ function renderAsennus(){
     const tr = document.createElement('tr');
     const rowKey = r.ref.modelId + '|' + r.ref.id;
     tr.draggable = true; tr.dataset.idx = idx; tr.dataset.key = rowKey;
-    if(rowKey === activeRefKey) tr.classList.add('active-row');
+    if(selectedKeys.has(rowKey)) tr.classList.add('active-row');
     tr.innerHTML =
       `<td class="drag no-print" title="Raahaa">⠿</td>`+
       `<td class="num seqno">${r.seq}</td>`+
@@ -397,7 +399,7 @@ function renderRahti(){
     const tr = document.createElement('tr');
     const rowKey = r.ref.modelId + '|' + r.ref.id;
     tr.dataset.key = rowKey;
-    if(rowKey === activeRefKey) tr.classList.add('active-row');
+    if(selectedKeys.has(rowKey)) tr.classList.add('active-row');
     tr.innerHTML =
       `<td class="num"><input class="load-in" type="number" min="1" value="${r.load||''}" data-load="${idx}"></td>`+
       `<td class="num seqno">${r.seq}</td>`+
@@ -408,7 +410,7 @@ function renderRahti(){
     tb.appendChild(tr);
   });
   tb.querySelectorAll('input[data-load]').forEach(inp=> inp.addEventListener('change', ()=>{ RAW[+inp.dataset.load].__load = inp.value ? +inp.value : ''; deriveRows(); renderSummary(); }));
-  tb.querySelectorAll('button[data-3d]').forEach(b=> b.addEventListener('click', ()=> select3D(ROWS[+b.dataset['3d']])));
+  tb.querySelectorAll('button[data-3d]').forEach(b=> b.addEventListener('click', ()=> focusRow(+b.dataset['3d'])));
   renderSummary();
 }
 
@@ -429,7 +431,7 @@ function wireAsennus(){
   tb.querySelectorAll('button[data-up]').forEach(b=> b.addEventListener('click', ()=> moveRow(+b.dataset.up, -1)));
   tb.querySelectorAll('button[data-down]').forEach(b=> b.addEventListener('click', ()=> moveRow(+b.dataset.down, +1)));
   tb.querySelectorAll('button[data-del]').forEach(b=> b.addEventListener('click', ()=> removeRow(+b.dataset.del)));
-  tb.querySelectorAll('button[data-3d]').forEach(b=> b.addEventListener('click', ()=> select3D(ROWS[+b.dataset['3d']])));
+  tb.querySelectorAll('button[data-3d]').forEach(b=> b.addEventListener('click', ()=> focusRow(+b.dataset['3d'])));
   // raahaus
   let dragIdx = null;
   tb.querySelectorAll('tr').forEach(tr=>{
@@ -451,20 +453,56 @@ function removeRow(idx){
 }
 function highlightActive(){
   document.querySelectorAll('#bodyAs tr, #bodyRa tr').forEach(tr=>{
-    tr.classList.toggle('active-row', !!tr.dataset.key && tr.dataset.key === activeRefKey);
+    tr.classList.toggle('active-row', !!tr.dataset.key && selectedKeys.has(tr.dataset.key));
   });
 }
-async function select3D(row){
-  if(!API || !row) return;
-  activeRefKey = row.ref.modelId + '|' + row.ref.id;   // merkitse rivi korostetuksi
+function focusRow(idx){
+  const r = ROWS[idx]; if(!r) return;
+  const key = r.ref.modelId + '|' + r.ref.id;
+  selectedKeys = new Set([key]); anchorKey = key;
+  applySelection(true);   // yksi rivi: valitse + zoomaa
+}
+function clickRow(e, key){
+  const idx = ROWS.findIndex(r => (r.ref.modelId + '|' + r.ref.id) === key);
+  if(idx < 0) return;
+  if(e.shiftKey && anchorKey){
+    const aIdx = ROWS.findIndex(r => (r.ref.modelId + '|' + r.ref.id) === anchorKey);
+    if(aIdx < 0){ selectedKeys = new Set([key]); anchorKey = key; }
+    else{ const s=Math.min(aIdx,idx), en=Math.max(aIdx,idx); selectedKeys = new Set(ROWS.slice(s, en+1).map(r => r.ref.modelId + '|' + r.ref.id)); }
+  } else if(e.ctrlKey || e.metaKey){
+    if(selectedKeys.has(key)) selectedKeys.delete(key); else selectedKeys.add(key);
+    anchorKey = key;
+  } else {
+    selectedKeys = new Set([key]); anchorKey = key;
+  }
+  applySelection(false);  // monivalinta: älä pomppaa kameraa
+}
+function attachRowClicks(tb){
+  tb.querySelectorAll('tr').forEach(tr=>{
+    if(!tr.dataset.key) return;
+    tr.style.cursor = 'pointer';
+    tr.addEventListener('click', e=>{
+      if(e.target.closest('button, input, .drag')) return;
+      clickRow(e, tr.dataset.key);
+    });
+  });
+}
+async function applySelection(zoom){
   highlightActive();
-  programmatic = true;
+  if(!API) return;
+  const byModel = {};
+  ROWS.forEach(r=>{ const k = r.ref.modelId + '|' + r.ref.id; if(selectedKeys.has(k)){ (byModel[r.ref.modelId] ??= []).push(r.ref.id); } });
+  const modelObjectIds = Object.entries(byModel).map(([modelId, objectRuntimeIds])=>({ modelId, objectRuntimeIds }));
+  programmatic = true;   // estä listasta tehdyn valinnan uudelleenpoiminta
   try{
-    const modelObjectIds = [{ modelId:row.ref.modelId, objectRuntimeIds:[row.ref.id] }];
     await API.viewer.setSelection({ modelObjectIds }, 'set');
-    try{ await API.viewer.setCamera({ modelObjectIds }); }catch(e){}
-  }catch(e){ setStatus('3D-korostus epäonnistui: '+e,'warn'); }
+    if(zoom && modelObjectIds.length){ try{ await API.viewer.setCamera({ modelObjectIds }); }catch(e){} }
+  }catch(e){ setStatus('3D-valinta epäonnistui: '+e,'warn'); }
   setTimeout(()=>{ programmatic=false; }, 400);
+}
+function clearSelection(){
+  selectedKeys.clear(); anchorKey = null;
+  applySelection(false);
 }
 function autoPack(maxWeight){
   let load=1, cur=0;
@@ -525,7 +563,8 @@ function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, m=>({ '&':'&amp
 /* ===================== Kytkennät ===================== */
 els('capBtn').addEventListener('click', toggleCapture);
 els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
-els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
+els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); selectedKeys.clear(); anchorKey=null; deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
+els('clearSel').addEventListener('click', clearSelection);
 ['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); }));
 els('packBtn').addEventListener('click', ()=>{ autoPack(num(els('maxLoad').value)||24000); });
 els('clearLoads').addEventListener('click', ()=>{ RAW.forEach(o=>o.__load=''); deriveRows(); render(); });
