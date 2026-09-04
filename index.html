@@ -241,7 +241,7 @@ async function toggleCapture(){
   const btn = els('capBtn');
   if(capture){
     programmatic = true;
-    try{ await API.viewer.setSettings({ assemblySelection:true }); }catch(e){}
+    Promise.resolve(API.viewer.setSettings({ assemblySelection:true })).catch(()=>{});
     setTimeout(()=>{ programmatic=false; }, 400);
     btn.textContent = '● Poiminta käynnissä – lopeta';
     btn.classList.add('cap-on');
@@ -271,7 +271,8 @@ function syncHighlightFromModel(sel){
   const modelSel = keysFromSelection(sel);
   const rowKeys = new Set(ROWS.map(r => r.ref.modelId + '|' + r.ref.id));
   selectedKeys = new Set([...modelSel].filter(k => rowKeys.has(k)));  // vain listalla olevat, mallissa valitut
-  anchorKey = null;
+  if(selectedKeys.size === 0) anchorKey = null;
+  else if(!anchorKey || !selectedKeys.has(anchorKey)) anchorKey = [...selectedKeys][0];  // säilytä Shift-ankkuri jos yhä valittu
   highlightActive();
 }
 
@@ -282,7 +283,7 @@ function startSelectionWatch(){
   if(selWatch) return;
   let last = '__init__';
   selWatch = setInterval(async ()=>{
-    if(!API) return;
+    if(!API || programmatic) return;   // omien setSelection-kutsujen aikana ei ylikirjoiteta listavalintaa
     let sel = null; try{ sel = await API.viewer.getSelection(); }catch(e){ sel = null; }  // virhe = ei valintaa
     const keys = [...keysFromSelection(sel)].sort().join(',');
     if(keys === last) return;       // ei muutosta -> ei tehdä mitään
