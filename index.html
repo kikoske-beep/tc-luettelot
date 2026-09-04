@@ -115,7 +115,7 @@
       <button class="btn sec" id="xlsAs">Vie Excel</button>
       <button class="btn sec" id="printAs">Tulosta / PDF</button>
     </div>
-    <p class="hint no-print">Rivit ovat poimintajärjestyksessä. Klikkaa riviä korostaaksesi kokoonpanon mallissa — Ctrl-klikkaus lisää valintaan, Shift-klikkaus valitsee välin. Säädä järjestystä ▲▼-napeilla tai raahaamalla ⠿-kahvasta, "3D" zoomaa kokoonpanoon, "✕" poistaa rivin.</p>
+    <p class="hint no-print">Klikkaa riviä tai kokoonpanoa mallissa — valinta näkyy molemmissa. Mallissa voit valita useita pitämällä Ctrl- tai Shift-näppäintä pohjassa. Järjestä rivit ▲▼-napeilla tai raahaamalla ⠿, "3D" zoomaa kokoonpanoon, "✕" poistaa rivin.</p>
     <div class="tablewrap">
       <table id="tblAs">
         <thead>
@@ -191,6 +191,7 @@ async function connect(){
   try{
     API = await TrimbleConnectWorkspace.connect(window.parent, onEvent, 30000);
     try{ const p = await API.project.getCurrentProject(); if(p&&p.name) els('projname').textContent = '— '+p.name; }catch(e){}
+    try{ await API.viewer.setSettings({ assemblySelection:true }); }catch(e){}   // klikkaus valitsee koko kokoonpanon
     setStatus('Yhteys muodostettu. Paina "Aloita poiminta" ja klikkaa kokoonpanoja mallista.','ok');
   }catch(e){
     setStatus('Yhteyttä ei saatu: '+e+'. Avaa työkalu Trimble Connectin 3D-katselussa.','warn');
@@ -199,8 +200,11 @@ async function connect(){
 
 async function onEvent(event, args){
   if(event === 'viewer.onSelectionChanged'){
-    if(!capture || programmatic) return;
-    try{ await onPick(); }catch(e){ console.warn(e); }
+    if(programmatic) return;                       // ohita omat setSelection-kutsut
+    let sel;
+    try{ sel = await API.viewer.getSelection(); }catch(e){ return; }
+    if(capture){ try{ await onPick(sel); }catch(e){ console.warn(e); } }   // poimintatilassa lisää rivit
+    syncHighlightFromModel(sel);                    // korosta listasta ne rivit jotka on valittu mallissa
   }
 }
 
@@ -244,7 +248,6 @@ async function toggleCapture(){
   }else{
     btn.textContent = 'Aloita poiminta mallista';
     btn.classList.remove('cap-on');
-    try{ await API.viewer.setSettings({ assemblySelection:false }); }catch(e){}
     setStatus(`Poiminta pysäytetty. Listassa ${RAW.length} kokoonpanoa.`);
   }
 }
@@ -256,6 +259,19 @@ function normalizeSelection(sel){
     modelId: s.modelId || s.modelID || s.model,
     ids: (s.objectRuntimeIds || s.runtimeIds || s.objects || s.ids || []).map(x => (typeof x==='object' ? x.id : x))
   })).filter(m=>m.modelId && m.ids && m.ids.length);
+}
+
+function keysFromSelection(sel){
+  const set = new Set();
+  normalizeSelection(sel).forEach(m => m.ids.forEach(id => set.add(m.modelId + '|' + id)));
+  return set;
+}
+function syncHighlightFromModel(sel){
+  const modelSel = keysFromSelection(sel);
+  const rowKeys = new Set(ROWS.map(r => r.ref.modelId + '|' + r.ref.id));
+  selectedKeys = new Set([...modelSel].filter(k => rowKeys.has(k)));  // vain listalla olevat, mallissa valitut
+  anchorKey = null;
+  highlightActive();
 }
 
 async function resolveAssembly(modelId, id){
@@ -277,8 +293,7 @@ async function resolveAssembly(modelId, id){
   return { id, props }; // fallback: käytä valittua objektia sellaisenaan
 }
 
-async function onPick(){
-  const sel = await API.viewer.getSelection();
+async function onPick(sel){
   const norm = normalizeSelection(sel);
   const fresh = [];
   for(const m of norm) for(const id of m.ids){
