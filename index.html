@@ -190,9 +190,9 @@ const setStatus = (m,c) => { const s=els('status'); s.textContent=m; s.className
 async function connect(){
   try{
     API = await TrimbleConnectWorkspace.connect(window.parent, onEvent, 30000);
+    startSelectionWatch();                                                        // aloita heti, ennen muita awaiteja
+    Promise.resolve(API.viewer.setSettings({ assemblySelection:true })).catch(()=>{});  // klikkaus valitsee koko kokoonpanon (ei jää odottamaan)
     try{ const p = await API.project.getCurrentProject(); if(p&&p.name) els('projname').textContent = '— '+p.name; }catch(e){}
-    try{ await API.viewer.setSettings({ assemblySelection:true }); }catch(e){}   // klikkaus valitsee koko kokoonpanon
-    startSelectionWatch();                                                        // pidä korostus mallin mukaisena
     setStatus('Yhteys muodostettu. Paina "Aloita poiminta" ja klikkaa kokoonpanoja mallista.','ok');
   }catch(e){
     setStatus('Yhteyttä ei saatu: '+e+'. Avaa työkalu Trimble Connectin 3D-katselussa.','warn');
@@ -202,10 +202,10 @@ async function connect(){
 async function onEvent(event, args){
   if(event === 'viewer.onSelectionChanged'){
     if(programmatic) return;                       // ohita omat setSelection-kutsut
-    let sel;
-    try{ sel = await API.viewer.getSelection(); }catch(e){ return; }
-    if(capture){ try{ await onPick(sel); }catch(e){ console.warn(e); } }   // poimintatilassa lisää rivit
-    syncHighlightFromModel(sel);                    // korosta listasta ne rivit jotka on valittu mallissa
+    let sel = null;
+    try{ sel = await API.viewer.getSelection(); }catch(e){ sel = null; }   // virhe = ei valintaa
+    if(capture && sel){ try{ await onPick(sel); }catch(e){ console.warn(e); } }   // poimintatilassa lisää rivit
+    syncHighlightFromModel(sel);                    // korosta ne rivit jotka on valittu mallissa (tyhjä = nollaa)
   }
 }
 
@@ -283,11 +283,11 @@ function startSelectionWatch(){
   let last = '__init__';
   selWatch = setInterval(async ()=>{
     if(!API) return;
-    let sel; try{ sel = await API.viewer.getSelection(); }catch(e){ return; }
+    let sel = null; try{ sel = await API.viewer.getSelection(); }catch(e){ sel = null; }  // virhe = ei valintaa
     const keys = [...keysFromSelection(sel)].sort().join(',');
     if(keys === last) return;       // ei muutosta -> ei tehdä mitään
     last = keys;
-    syncHighlightFromModel(sel);     // päivitä korostus vastaamaan mallia
+    syncHighlightFromModel(sel);     // päivitä korostus vastaamaan mallia (tyhjä = nollaa)
   }, 400);
 }
 
