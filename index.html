@@ -41,6 +41,7 @@
   tbody tr.active-row td:first-child{ box-shadow:inset 4px 0 0 var(--warn); }
   .drag{ cursor:grab; color:#9aa2ad; width:22px; text-align:center; }
   .seqno{ font-weight:700; color:var(--blue); }
+  tbody tr{ user-select:none; -webkit-user-select:none; }
   .mini{ padding:3px 7px; font-size:11px; border-radius:5px; border:1px solid #cfd5dd; background:#fff; cursor:pointer; }
   .mini:hover{ background:#eef4fa; border-color:var(--blue); color:var(--blue); }
   .mini.del:hover{ background:#fdecea; border-color:var(--red); color:var(--red); }
@@ -400,10 +401,10 @@ function renderAsennus(){
   ROWS.forEach((r, idx)=>{
     const tr = document.createElement('tr');
     const rowKey = r.ref.modelId + '|' + r.ref.id;
-    tr.draggable = true; tr.dataset.idx = idx; tr.dataset.key = rowKey;
+    tr.dataset.idx = idx; tr.dataset.key = rowKey;
     if(selectedKeys.has(rowKey)) tr.classList.add('active-row');
     tr.innerHTML =
-      `<td class="drag no-print" title="Raahaa">⠿</td>`+
+      `<td class="drag no-print" draggable="true" title="Raahaa järjestykseen">⠿</td>`+
       `<td class="num seqno">${r.seq}</td>`+
       `<td>${escapeHtml(r.mark)}</td>`+
       `<td>${escapeHtml(r.profile)}</td>`+
@@ -465,14 +466,17 @@ function wireAsennus(){
   tb.querySelectorAll('button[data-down]').forEach(b=> b.addEventListener('click', ()=> moveRow(+b.dataset.down, +1)));
   tb.querySelectorAll('button[data-del]').forEach(b=> b.addEventListener('click', ()=> removeRow(+b.dataset.del)));
   tb.querySelectorAll('button[data-3d]').forEach(b=> b.addEventListener('click', ()=> focusRow(+b.dataset['3d'])));
-  // raahaus
+  // raahaus vain kahvasta (⠿), jotta rivin klikkaus jää monivalinnalle
   let dragIdx = null;
   tb.querySelectorAll('tr').forEach(tr=>{
-    tr.addEventListener('dragstart', e=>{ dragIdx=+tr.dataset.idx; tr.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
-    tr.addEventListener('dragend', ()=>{ tr.classList.remove('dragging'); tb.querySelectorAll('tr').forEach(t=>t.classList.remove('dragover')); });
+    const handle = tr.querySelector('.drag');
+    if(handle){
+      handle.addEventListener('dragstart', e=>{ dragIdx=+tr.dataset.idx; tr.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+      handle.addEventListener('dragend', ()=>{ tr.classList.remove('dragging'); tb.querySelectorAll('tr').forEach(t=>t.classList.remove('dragover')); });
+    }
     tr.addEventListener('dragover', e=>{ e.preventDefault(); tr.classList.add('dragover'); });
     tr.addEventListener('dragleave', ()=> tr.classList.remove('dragover'));
-    tr.addEventListener('drop', e=>{ e.preventDefault(); const to=+tr.dataset.idx; if(dragIdx==null||dragIdx===to) return; const [m]=RAW.splice(dragIdx,1); RAW.splice(to,0,m); deriveRows(); render(); });
+    tr.addEventListener('drop', e=>{ e.preventDefault(); const to=+tr.dataset.idx; if(dragIdx==null||dragIdx===to){ dragIdx=null; return; } const [m]=RAW.splice(dragIdx,1); RAW.splice(to,0,m); dragIdx=null; deriveRows(); render(); });
   });
 }
 function moveRow(idx, dir){
