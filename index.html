@@ -71,7 +71,7 @@
 <header>
   Trutec – Asennus- &amp; rahtiluettelot
   <small id="projname"></small>
-  <span style="margin-left:auto;font-size:11px;opacity:.75">v7</span>
+  <span style="margin-left:auto;font-size:11px;opacity:.75">v8</span>
 </header>
 
 <div class="wrap">
@@ -198,17 +198,22 @@
       <span id="pdfName" style="font-size:12px;color:#667"></span>
     </div>
     <div class="row-actions" style="margin-top:10px">
-      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Väri
-        <input type="color" id="colorPick" value="#2e7d32" style="width:46px;height:32px;padding:2px">
-      </label>
-      <button class="mini" data-color="#2e7d32">Toimitettu</button>
-      <button class="mini" data-color="#ed6c02">Menossa</button>
-      <button class="mini" data-color="#1565c0">Asennettu</button>
+      <button class="btn" id="colorStatusBtn" disabled>Väritä tilan mukaan</button>
+      <span style="font-size:11px;color:#667">vihreä = toimitettu, oranssi = osittain</span>
       <span style="flex:1"></span>
-      <button class="btn" id="colorBtn" disabled>Väritä osumat</button>
+      <button class="btn sec" id="exportReconBtn" disabled>Vie taulukko (CSV)</button>
+      <button class="btn sec" id="clearDeliveriesBtn">Nollaa toimitukset</button>
+    </div>
+    <div class="row-actions" style="margin-top:6px">
+      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Yksi väri
+        <input type="color" id="colorPick" value="#1565c0" style="width:46px;height:32px;padding:2px">
+      </label>
+      <button class="btn sec" id="colorBtn" disabled>Väritä osumat yhdellä värillä</button>
       <button class="btn sec" id="resetColorBtn">Nollaa värit</button>
     </div>
     <div id="delStatus" class="hint" style="min-height:16px"></div>
+    <div id="loadedNotes"></div>
+    <div id="reconTable"></div>
     <div id="delResults"></div>
   </div>
 </div>
@@ -639,6 +644,9 @@ let MARKINDEX = new Map();    // normalisoitu tunnus -> [{modelId,id}]
 let scanned = false;
 let lastMatched = [];         // [{mark, count, refs:[{modelId,id}]}]
 let lastPdfText = '';
+let lastPdfRows = null;       // rekonstruoidut PDF-rivit (määrien lukua varten)
+let NOTES = new Map();        // rahtikirja (nimi) -> Map(tunnus -> kpl)
+let DELIVERED = new Map();    // tunnus -> toimitettu kpl yhteensä (kaikki rahtikirjat)
 
 const normMark = s => String(s==null?'':s).trim().toUpperCase();
 function escapeRegex(s){ return s.replace(/[.*+?^${}()|[\]\\/-]/g,'\\$&'); }
@@ -751,28 +759,38 @@ async function extractPdfText(file){
   if(!ok || !window.pdfjsLib) throw new Error('PDF-kirjaston lataus epäonnistui');
   const buf = await file.arrayBuffer();
   const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
-  let text = '';
+  const rows = [];
   for(let p=1;p<=pdf.numPages;p++){
     setDelStatus(`Luetaan PDF-tekstiä… sivu ${p}/${pdf.numPages}`);
     const page = await pdf.getPage(p);
     const tc = await page.getTextContent();
-    text += ' ' + tc.items.map(it=>it.str).join(' ');
+    // Rekonstruoi rivit sijainnin (y) perusteella -> tunnus ja määrä saadaan sarakkeista, eikä teksti liimaudu
+    const items = tc.items.filter(it=>it.str && it.str.trim()).map(it=>({ x:it.transform[4], y:it.transform[5], s:it.str }));
+    items.sort((a,b)=> (b.y - a.y) || (a.x - b.x));
+    const tol = 3; const groups = [];
+    for(const it of items){
+      const g = groups.length ? groups[groups.length-1] : null;
+      if(g && Math.abs(it.y - g.y) <= tol){ g.items.push(it); g.y = (g.y + it.y)/2; }
+      else groups.push({ y: it.y, items:[it] });
+    }
+    groups.forEach(g=>{ const s = g.items.sort((a,b)=>a.x-b.x).map(o=>o.s).join(' ').replace(/\s+/g,' ').trim(); if(s) rows.push(s); });
   }
-  if(text.replace(/\s/g,'').length >= 8) return { text, ocr:false };
+  const text = rows.join(' \n ');
+  if(text.replace(/\s/g,'').length >= 8) return { text, rows, ocr:false };
   // Skannattu PDF -> tekstintunnistus
   setDelStatus('PDF näyttää skannatulta — käynnistetään tekstintunnistus (OCR). Tämä voi kestää hetken…');
   const okT = await loadTesseract();
   if(!okT || !window.Tesseract) throw new Error('Tekstiä ei löytynyt eikä OCR-kirjastoa saatu ladattua');
-  let otext = '';
+  const orows = [];
   for(let p=1;p<=pdf.numPages;p++){
     const page = await pdf.getPage(p);
     const viewport = page.getViewport({ scale: 2 });
     const canvas = document.createElement('canvas'); canvas.width=viewport.width; canvas.height=viewport.height;
     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
     setDelStatus(`Tekstintunnistus… sivu ${p}/${pdf.numPages}`);
-    try{ const r = await window.Tesseract.recognize(canvas, 'eng'); otext += ' ' + ((r&&r.data&&r.data.text)||''); }catch(e){}
+    try{ const r = await window.Tesseract.recognize(canvas, 'eng'); ((r&&r.data&&r.data.text)||'').split(/\n/).forEach(l=>{ if(l.trim()) orows.push(l.trim()); }); }catch(e){}
   }
-  return { text: otext, ocr:true };
+  return { text: orows.join(' \n '), rows: orows, ocr:true };
 }
 
 function matchText(text){
@@ -799,6 +817,81 @@ function renderDelivery(notInModel){
   els('delResults').innerHTML = html;
 }
 
+function parseNoteQuantities(rows){
+  // Lukee kultakin riviltä, jonka ensimmäinen sarake on mallin tunnus, Kogus/Qty-määrän (= toiseksi viimeinen numero)
+  const q = new Map();
+  if(!rows) return q;
+  for(const row of rows){
+    const toks = row.trim().split(/\s+/); if(!toks.length) continue;
+    const first = normMark(toks[0]);
+    if(!MARKINDEX.has(first)) continue;
+    const nums = row.match(/\d+(?:[.,]\d+)?/g) || [];
+    let qty = 1;
+    if(nums.length>=2){ const n = parseInt(String(nums[nums.length-2]).replace(',','.'),10); if(!isNaN(n) && n>0) qty = n; }
+    q.set(first, (q.get(first)||0) + qty);
+  }
+  return q;
+}
+function aggregateDelivered(){
+  DELIVERED = new Map();
+  for(const qm of NOTES.values()){ for(const [m,q] of qm){ DELIVERED.set(m, (DELIVERED.get(m)||0) + q); } }
+}
+function reconRows(){
+  return [...DELIVERED.keys()].map(mark=>{
+    const M = (MARKINDEX.get(mark)||[]).length, D = DELIVERED.get(mark);
+    return { mark, D, M, remaining: M-D, status: M===0 ? 'Ei mallissa' : (D>M ? 'YLITYS' : (D>=M ? 'Toimitettu' : 'Osittain')) };
+  }).sort((a,b)=>naturalCompare(a.mark,b.mark));
+}
+function renderRecon(){
+  const notes = [...NOTES.keys()];
+  els('loadedNotes').innerHTML = notes.length ? (`<div class="reslbl">Ladatut rahtikirjat (${notes.length}):</div><div class="chips">` + notes.map(n=>`<span class="chip">${escapeHtml(n)}</span>`).join('') + `</div>`) : '';
+  if(!DELIVERED.size){ els('reconTable').innerHTML=''; els('exportReconBtn').disabled=true; els('colorStatusBtn').disabled=true; return; }
+  const rows = reconRows();
+  const full = rows.filter(r=>r.status==='Toimitettu').length;
+  const part = rows.filter(r=>r.status==='Osittain').length;
+  const over = rows.filter(r=>r.status==='YLITYS').length;
+  const notm = rows.filter(r=>r.status==='Ei mallissa').length;
+  const undelivered = MARKINDEX.size - rows.filter(r=>r.M>0).length;
+  let html = `<div class="reslbl">Täsmäytys — ${full} täysin toimitettu, ${part} osittain${over?`, <span style="color:#c0392b">${over} YLITYS</span>`:''}${notm?`, ${notm} ei mallissa`:''}. Mallissa vielä toimittamatta ${undelivered} tunnusta.</div>`;
+  html += `<div class="tablewrap" style="max-height:40vh"><table><thead><tr><th>Tunnus</th><th class="num">Toimitettu</th><th class="num">Mallissa</th><th class="num">Jäljellä</th><th>Tila</th></tr></thead><tbody>`;
+  html += rows.map(r=>{
+    const col = r.status==='Toimitettu' ? '#1a7f37' : (r.status==='Osittain' ? '#b35900' : (r.status==='YLITYS' ? '#c0392b' : '#8a929c'));
+    return `<tr><td>${escapeHtml(r.mark)}</td><td class="num">${r.D}</td><td class="num">${r.M}</td><td class="num">${r.remaining}</td><td style="color:${col};font-weight:600">${r.status}</td></tr>`;
+  }).join('');
+  html += `</tbody></table></div>`;
+  els('reconTable').innerHTML = html;
+  els('exportReconBtn').disabled = false;
+  els('colorStatusBtn').disabled = false;
+}
+async function colorByStatus(){
+  if(!API || !DELIVERED.size) return;
+  const full = {}, part = {};
+  for(const [mark, D] of DELIVERED){
+    const refs = MARKINDEX.get(mark); if(!refs || !refs.length) continue;
+    const bucket = (D >= refs.length) ? full : part;
+    refs.forEach(r=>{ (bucket[r.modelId] ??= []).push(r.id); });
+  }
+  try{
+    for(const [modelId, ids] of Object.entries(full)) await API.viewer.setObjectState({ modelObjectIds:[{ modelId, objectRuntimeIds:ids }] }, { color:'#2e7d32' });
+    for(const [modelId, ids] of Object.entries(part)) await API.viewer.setObjectState({ modelObjectIds:[{ modelId, objectRuntimeIds:ids }] }, { color:'#ed6c02' });
+    const nf = Object.values(full).reduce((s,a)=>s+a.length,0), np = Object.values(part).reduce((s,a)=>s+a.length,0);
+    setDelStatus(`Väritetty: ${nf} kokoonpanoa vihreä (toimitettu), ${np} oranssi (osittain).`,'ok');
+  }catch(e){ setDelStatus('Väritys epäonnistui: '+e,'warn'); }
+}
+async function clearDeliveries(){
+  NOTES.clear(); DELIVERED = new Map(); lastPdfRows = null;
+  els('pdfName').textContent = '';
+  renderRecon();
+  els('delResults').innerHTML = '';
+  try{ if(API) await API.viewer.setObjectState(undefined, { color:'reset' }); }catch(e){}
+  setDelStatus('Toimitukset ja värit nollattu.','ok');
+}
+function exportRecon(){
+  if(!DELIVERED.size) return;
+  const cols = [{key:'mark',label:'Tunnus'},{key:'D',label:'Toimitettu'},{key:'M',label:'Mallissa'},{key:'remaining',label:'Jäljellä'},{key:'status',label:'Tila'}];
+  download('toimitukset_tasmaytys.csv', toCsv(reconRows(), cols), 'text/csv;charset=utf-8');
+}
+
 async function applyColor(){
   if(!API || !lastMatched.length) return;
   const hex = els('colorPick').value || '#2e7d32';
@@ -822,7 +915,7 @@ els('capBtn').addEventListener('click', toggleCapture);
 els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
 els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); selectedKeys.clear(); anchorKey=null; deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
 els('clearSel').addEventListener('click', clearSelection);
-['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); if(id==='fMark' && scanned){ buildMarkIndex(); if(lastPdfText) matchText(lastPdfText); } }));
+['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); if(id==='fMark' && scanned){ buildMarkIndex(); NOTES.clear(); DELIVERED=new Map(); if(lastPdfText) matchText(lastPdfText); renderRecon(); } }));
 els('packBtn').addEventListener('click', ()=>{ autoPack(num(els('maxLoad').value)||24000); });
 els('clearLoads').addEventListener('click', ()=>{ RAW.forEach(o=>o.__load=''); deriveRows(); render(); });
 els('csvAs').addEventListener('click', ()=>exportCsv('as'));
@@ -834,7 +927,9 @@ els('printRa').addEventListener('click', ()=>{ showTab('rahti'); setTimeout(()=>
 els('scanBtn').addEventListener('click', scanAllAssemblies);
 els('colorBtn').addEventListener('click', applyColor);
 els('resetColorBtn').addEventListener('click', resetColors);
-document.querySelectorAll('#tab-toimitus [data-color]').forEach(b=> b.addEventListener('click', ()=>{ els('colorPick').value = b.dataset.color; }));
+els('colorStatusBtn').addEventListener('click', colorByStatus);
+els('clearDeliveriesBtn').addEventListener('click', clearDeliveries);
+els('exportReconBtn').addEventListener('click', exportRecon);
 els('pdfInput').addEventListener('change', async (e)=>{
   const file = e.target.files && e.target.files[0]; if(!file) return;
   els('pdfName').textContent = file.name;
@@ -843,11 +938,22 @@ els('pdfInput').addEventListener('change', async (e)=>{
     if(!scanned) await scanAllAssemblies();
     if(!scanned) return;
     setDelStatus('Käsitellään PDF:ää…');
-    const { text, ocr } = await extractPdfText(file);
-    lastPdfText = text;
-    matchText(text);
-    if(lastMatched.length) setDelStatus(`Valmis${ocr?' (OCR)':''}. Löytyi ${lastMatched.length} tunnusta. Valitse väri ja paina "Väritä osumat".`,'ok');
-    else setDelStatus(`PDF luettu${ocr?' (OCR)':''}, mutta yhtään mallin tunnusta ei löytynyt. Tarkista, että "Tunnus"-kenttä (yläreunassa) osoittaa oikeaan ominaisuuteen.`,'warn');
+    const { text, rows, ocr } = await extractPdfText(file);
+    lastPdfText = text; lastPdfRows = rows;
+    matchText(text);   // läsnäolo -> lastMatched + sirut + yhden värin nappi
+    // Määrät: lue Qty-sarake ja liitä osumiin (oletus 1 jos ei löydy)
+    const nq = parseNoteQuantities(rows);
+    const noteMap = new Map();
+    lastMatched.forEach(m=>{ noteMap.set(m.mark, nq.get(m.mark) ?? 1); });
+    NOTES.set(file.name, noteMap);   // sama tiedostonimi korvaa -> ei tuplalaskentaa
+    aggregateDelivered();
+    renderRecon();
+    if(lastMatched.length){
+      const pcs = [...noteMap.values()].reduce((s,v)=>s+v,0);
+      setDelStatus(`Valmis${ocr?' (OCR)':''}: ${lastMatched.length} tunnusta, ${pcs} kpl tässä rahtikirjassa. Katso täsmäytys alta ja "Väritä tilan mukaan".`,'ok');
+    } else {
+      setDelStatus(`PDF luettu${ocr?' (OCR)':''}, mutta yhtään mallin tunnusta ei löytynyt. Tarkista, että "Tunnus"-kenttä (yläreunassa) osoittaa oikeaan ominaisuuteen.`,'warn');
+    }
   }catch(err){ setDelStatus('Virhe: '+(err&&err.message||err),'warn'); }
   finally{ e.target.value=''; }
 });
