@@ -53,11 +53,6 @@
   .status-ok{ color:var(--ok); } .status-warn{ color:var(--warn); }
   .pill{ display:inline-block; background:#eef4fa; color:var(--blue); border-radius:20px; padding:2px 10px; font-size:12px; }
   .empty{ padding:26px; text-align:center; color:#8a929c; }
-  .chip{ display:inline-block; background:#eef4fa; color:#12507e; border:1px solid #cfe0ef; border-radius:14px; padding:2px 9px; font-size:12px; margin:2px 3px; }
-  .chip.warn{ background:#fff3e6; color:#8a4b00; border-color:#f0d3ad; }
-  .chips{ margin:6px 0 2px; max-height:160px; overflow:auto; }
-  .reslbl{ font-size:12px; color:#556; font-weight:600; margin-top:10px; }
-  input[type=color]{ border:1px solid #c7ccd4; border-radius:6px; background:#fff; }
   .hint{ color:#788; font-size:11.5px; margin:8px 0 4px; }
   @media print{
     header,.panel.controls,.tabs .tab:not(.active),.row-actions,.drag,.col3d,.actcol,.no-print{ display:none !important; }
@@ -71,7 +66,6 @@
 <header>
   Trutec – Asennus- &amp; rahtiluettelot
   <small id="projname"></small>
-  <span style="margin-left:auto;font-size:11px;opacity:.75">v9</span>
 </header>
 
 <div class="wrap">
@@ -110,8 +104,6 @@
   <div class="tabs">
     <button class="tab active" data-tab="asennus">Asennusjärjestys</button>
     <button class="tab" data-tab="rahti">Rahtiluettelo</button>
-    <button class="tab" data-tab="toimitus">Toimitukset</button>
-    <button class="tab" data-tab="suunta">Asennussuunta</button>
   </div>
 
   <!-- ASENNUSJÄRJESTYS -->
@@ -184,69 +176,6 @@
       </table>
     </div>
   </div>
-
-  <!-- TOIMITUKSET (PDF-rahtikirja -> väritys) -->
-  <div class="panel" id="tab-toimitus" style="display:none">
-    <p class="hint no-print" style="margin-top:0">Lataa rahtikirja (PDF), niin työkalu etsii siitä mallin kokoonpanotunnukset ja värittää osumat mallissa — näet mitä on toimitettu tai tulossa. Toimii sekä tekstipohjaisilla että skannatuilla PDF:illä (skannatuille tehdään tekstintunnistus).</p>
-    <div class="row-actions">
-      <button class="btn sec" id="scanBtn">Lue mallin kokoonpanot</button>
-      <span class="pill" id="scanPill">ei luettu</span>
-    </div>
-    <div class="row-actions" style="margin-top:10px">
-      <label class="btn" style="position:relative;overflow:hidden">Valitse rahtikirja (PDF)
-        <input type="file" id="pdfInput" accept="application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer">
-      </label>
-      <span id="pdfName" style="font-size:12px;color:#667"></span>
-    </div>
-    <div class="row-actions" style="margin-top:10px">
-      <button class="btn" id="colorStatusBtn" disabled>Väritä tilan mukaan</button>
-      <span style="font-size:11px;color:#667">vihreä = toimitettu, oranssi = osittain</span>
-      <span style="flex:1"></span>
-      <button class="btn sec" id="exportReconBtn" disabled>Vie taulukko (CSV)</button>
-      <button class="btn sec" id="clearDeliveriesBtn">Nollaa toimitukset</button>
-    </div>
-    <div class="row-actions" style="margin-top:6px">
-      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Yksi väri
-        <input type="color" id="colorPick" value="#1565c0" style="width:46px;height:32px;padding:2px">
-      </label>
-      <button class="btn sec" id="colorBtn" disabled>Väritä osumat yhdellä värillä</button>
-      <button class="btn sec" id="resetColorBtn">Nollaa värit</button>
-    </div>
-    <div id="delStatus" class="hint" style="min-height:16px"></div>
-    <div id="loadedNotes"></div>
-    <div id="reconTable"></div>
-    <div id="delResults"></div>
-  </div>
-
-  <!-- ASENNUSSUUNTA (väritä linja kerrallaan ruudukon mukaan) -->
-  <div class="panel" id="tab-suunta" style="display:none">
-    <p class="hint no-print" style="margin-top:0">Väritä malli asennuksen etenemisen mukaan, linja kerrallaan ruudukon mukaan (esim. linjalta 1 eteenpäin). Linjatieto luetaan sijaintikoodista (esim. "7/A" → linja 7).</p>
-    <div class="row-actions">
-      <button class="btn sec" id="scanBtn2">Lue linjat mallista</button>
-      <span class="pill" id="linePill">ei luettu</span>
-      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Sijaintikoodi
-        <select id="fCode" style="min-width:180px"></select>
-      </label>
-    </div>
-    <div class="row-actions" style="margin-top:10px">
-      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Suunta
-        <select id="dirSel">
-          <option value="asc">Linja 1 → suurin</option>
-          <option value="desc">Suurin → linja 1</option>
-        </select>
-      </label>
-      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">
-        <input type="checkbox" id="dimPending" checked style="width:auto"> Näytä asentamattomat harmaana
-      </label>
-    </div>
-    <div class="row-actions" style="margin-top:10px">
-      <button class="btn sec" id="prevLine">‹ Edellinen</button>
-      <input type="range" id="progress" min="0" max="0" value="0" style="flex:1;min-width:120px">
-      <button class="btn" id="nextLine">Seuraava ›</button>
-    </div>
-    <div id="suuntaStatus" class="hint" style="min-height:16px"></div>
-    <div class="row-actions"><button class="btn sec" id="resetSuunta">Nollaa värit</button></div>
-  </div>
 </div>
 
 <script>
@@ -296,7 +225,6 @@ const DEFAULTS = {
   profile:['Profile','PROFILE','Section','Cross section','Cross-section','Profiili'],
   material:['Material','MATERIAL','Grade','Steel grade','Materiaali','Laatu'],
   length: ['Length','LENGTH','Cut length','Nettopituus','Pituus'],
-  code: ['Assembly/Cast unit position code','Cast unit position code','Assembly position code','Position code','ASSEMBLY_POS_CODE','Position'],
 };
 
 /* ===================== Tila ===================== */
@@ -670,344 +598,12 @@ async function exportXlsx(which){
 }
 function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
-/* ===================== Toimitukset: PDF-rahtikirja -> tunnukset -> väritys ===================== */
-let ALLASM = [];              // kaikki mallin kokoonpanot (ObjectProperties + __modelId)
-let MARKINDEX = new Map();    // normalisoitu tunnus -> [{modelId,id}]
-let scanned = false;
-let lastMatched = [];         // [{mark, count, refs:[{modelId,id}]}]
-let lastPdfText = '';
-let lastPdfRows = null;       // rekonstruoidut PDF-rivit (määrien lukua varten)
-let NOTES = new Map();        // rahtikirja (nimi) -> Map(tunnus -> kpl)
-let DELIVERED = new Map();    // tunnus -> toimitettu kpl yhteensä (kaikki rahtikirjat)
-let LINEINDEX = new Map();    // linjanumero -> [{modelId,id}]  (asennussuunta)
-let suuntaStep = 0;           // montako linjaa "asennettu"
-
-const normMark = s => String(s==null?'':s).trim().toUpperCase();
-function escapeRegex(s){ return s.replace(/[.*+?^${}()|[\]\\/-]/g,'\\$&'); }
-function markFound(mark, upperText){
-  // tiukka: tunnus omana "sanana"
-  if(new RegExp('(?:^|[^A-Z0-9])'+escapeRegex(mark)+'(?:$|[^A-Z0-9])').test(upperText)) return true;
-  // löysä: erottuville tunnuksille (>=5 merkkiä, sis. kirjaimen ja numeron) sallitaan edeltävä liimautunut merkki,
-  // mutta perässä oltava ei-alfanumeerinen -> löytää esim. "117.34CB1023" ilman että "4CB102" osuu "4CB1023":een
-  if(mark.length>=5 && /[A-Z]/.test(mark) && /[0-9]/.test(mark) && new RegExp(escapeRegex(mark)+'(?![A-Z0-9])').test(upperText)) return true;
-  return false;
-}
-function candidateTokens(upperText){
-  const set = new Set();
-  (upperText||'').split(/[\s,;|()\[\]{}<>"'!?*=]+/).forEach(t=>{
-    t = t.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g,'');
-    if(t.length>=2 && t.length<=14 && /[A-Z]/.test(t) && /[0-9]/.test(t) && /^[A-Z0-9/._-]+$/.test(t)) set.add(t);
-  });
-  return set;
-}
-function setDelStatus(m,c){ const s=els('delStatus'); if(s){ s.textContent=m; s.className='hint'+(c?' status-'+c:''); } }
-
-async function scanAllAssemblies(){
-  if(!API){ setDelStatus('Ei yhteyttä Trimble Connectiin.','warn'); return; }
-  els('scanBtn').disabled = true;
-  try{
-    setDelStatus('Luetaan mallin objektit…');
-    const all = await API.viewer.getObjects();
-    const totalObjects = all.reduce((s,m)=>s+((m.objects||[]).length),0);
-    if(totalObjects===0){ setDelStatus('Ei mallia ladattuna 3D-katseluun (tai malli on tyhjä). Avaa IFC-malli ensin.','warn'); els('scanPill').textContent='0 kokoonpanoa'; els('scanBtn').disabled=false; return; }
-
-    // getObjects ei aina palauta luokkatietoa -> jos ei, haetaan objektien ominaisuudet ja suodatetaan niistä
-    const isAsmClass = c => c && String(c).toUpperCase().replace(/\s/g,'')==='IFCELEMENTASSEMBLY';
-    const hasClass = all.some(m => (m.objects||[]).some(o => o.class));
-    let target;
-    if(hasClass){
-      target = all.map(m=>({ modelId:m.modelId, ids:(m.objects||[]).filter(o=>isAsmClass(o.class)).map(o=>o.id) })).filter(m=>m.ids.length);
-      if(!target.length) target = all.map(m=>({ modelId:m.modelId, ids:(m.objects||[]).map(o=>o.id) })).filter(m=>m.ids.length);
-    } else {
-      target = all.map(m=>({ modelId:m.modelId, ids:(m.objects||[]).map(o=>o.id) })).filter(m=>m.ids.length);
-    }
-
-    const total = target.reduce((s,m)=>s+m.ids.length,0);
-    if(total>15000) setDelStatus(`Isohko malli (${total} objektia) — luku voi kestää hetken…`);
-    ALLASM = []; let done=0; const B=500;
-    for(const m of target){
-      for(let i=0;i<m.ids.length;i+=B){
-        const chunk = m.ids.slice(i,i+B);
-        let props=[]; try{ props = await API.viewer.getObjectProperties(m.modelId, chunk); }catch(e){}
-        props.forEach(p=>{ p.__modelId=m.modelId; ALLASM.push(p); });
-        done += chunk.length; setDelStatus(`Luetaan ominaisuuksia… ${done}/${total}`);
-      }
-    }
-
-    // Luokka saadaan luotettavasti getObjectProperties-kutsusta; suodata kokoonpanoihin, muuten käytä kaikkia
-    const asmOnly = ALLASM.filter(p => isAsmClass(p.class));
-    let note = '';
-    if(asmOnly.length){ ALLASM = asmOnly; }
-    else { note = ' — huom: IfcElementAssembly-luokkaa ei löytynyt, käytössä kaikki objektit'; }
-
-    mergeSelectors(ALLASM);
-    buildMarkIndex();
-    scanned = true;
-    const unit = asmOnly.length ? 'kokoonpanoa' : 'objektia';
-    els('scanPill').textContent = `${ALLASM.length} ${unit}, ${MARKINDEX.size} tunnusta`;
-    if(MARKINDEX.size===0) setDelStatus(`Luettu ${ALLASM.length} ${unit}, mutta tunnuksia ei löytynyt valitulla kentällä. Valitse yläreunan "Tunnus"-valikosta oikea ominaisuus.${note}`,'warn');
-    else setDelStatus(`Malli luettu: ${ALLASM.length} ${unit}, ${MARKINDEX.size} eri tunnusta${note}.`,'ok');
-  }catch(e){ setDelStatus('Virhe mallia luettaessa: '+e,'warn'); }
-  finally{ els('scanBtn').disabled = false; }
-}
-
-function buildMarkIndex(){
-  MARKINDEX = new Map();
-  const map = currentMap();
-  for(const o of ALLASM){
-    const m = normMark(findProp(flattenProps(o), map.mark));
-    if(!m) continue;
-    if(!MARKINDEX.has(m)) MARKINDEX.set(m, []);
-    MARKINDEX.get(m).push({ modelId:o.__modelId, id:o.id });
-  }
-}
-
-let PDFJS_READY = null;
-function loadPdfJs(){
-  if(window.pdfjsLib) return Promise.resolve(true);
-  if(PDFJS_READY) return PDFJS_READY;
-  PDFJS_READY = new Promise(res=>{
-    const s=document.createElement('script');
-    s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
-    s.onload=()=>{ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js'; }catch(e){} res(true); };
-    s.onerror=()=>res(false);
-    document.head.appendChild(s);
-  });
-  return PDFJS_READY;
-}
-let TESS_READY = null;
-function loadTesseract(){
-  if(window.Tesseract) return Promise.resolve(true);
-  if(TESS_READY) return TESS_READY;
-  TESS_READY = new Promise(res=>{
-    const s=document.createElement('script');
-    s.src='https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js';
-    s.onload=()=>res(true); s.onerror=()=>res(false);
-    document.head.appendChild(s);
-  });
-  return TESS_READY;
-}
-
-async function extractPdfText(file){
-  const ok = await loadPdfJs();
-  if(!ok || !window.pdfjsLib) throw new Error('PDF-kirjaston lataus epäonnistui');
-  const buf = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
-  const rows = [];
-  for(let p=1;p<=pdf.numPages;p++){
-    setDelStatus(`Luetaan PDF-tekstiä… sivu ${p}/${pdf.numPages}`);
-    const page = await pdf.getPage(p);
-    const tc = await page.getTextContent();
-    // Rekonstruoi rivit sijainnin (y) perusteella -> tunnus ja määrä saadaan sarakkeista, eikä teksti liimaudu
-    const items = tc.items.filter(it=>it.str && it.str.trim()).map(it=>({ x:it.transform[4], y:it.transform[5], s:it.str }));
-    items.sort((a,b)=> (b.y - a.y) || (a.x - b.x));
-    const tol = 3; const groups = [];
-    for(const it of items){
-      const g = groups.length ? groups[groups.length-1] : null;
-      if(g && Math.abs(it.y - g.y) <= tol){ g.items.push(it); g.y = (g.y + it.y)/2; }
-      else groups.push({ y: it.y, items:[it] });
-    }
-    groups.forEach(g=>{ const s = g.items.sort((a,b)=>a.x-b.x).map(o=>o.s).join(' ').replace(/\s+/g,' ').trim(); if(s) rows.push(s); });
-  }
-  const text = rows.join(' \n ');
-  if(text.replace(/\s/g,'').length >= 8) return { text, rows, ocr:false };
-  // Skannattu PDF -> tekstintunnistus
-  setDelStatus('PDF näyttää skannatulta — käynnistetään tekstintunnistus (OCR). Tämä voi kestää hetken…');
-  const okT = await loadTesseract();
-  if(!okT || !window.Tesseract) throw new Error('Tekstiä ei löytynyt eikä OCR-kirjastoa saatu ladattua');
-  const orows = [];
-  for(let p=1;p<=pdf.numPages;p++){
-    const page = await pdf.getPage(p);
-    const viewport = page.getViewport({ scale: 2 });
-    const canvas = document.createElement('canvas'); canvas.width=viewport.width; canvas.height=viewport.height;
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    setDelStatus(`Tekstintunnistus… sivu ${p}/${pdf.numPages}`);
-    try{ const r = await window.Tesseract.recognize(canvas, 'eng'); ((r&&r.data&&r.data.text)||'').split(/\n/).forEach(l=>{ if(l.trim()) orows.push(l.trim()); }); }catch(e){}
-  }
-  return { text: orows.join(' \n '), rows: orows, ocr:true };
-}
-
-function matchText(text){
-  if(!scanned || !MARKINDEX.size){ setDelStatus('Lue ensin mallin kokoonpanot.','warn'); return; }
-  const upper = (text||'').toUpperCase();
-  lastMatched = [];
-  for(const [mark, refs] of MARKINDEX){ if(markFound(mark, upper)) lastMatched.push({ mark, count:refs.length, refs }); }
-  lastMatched.sort((a,b)=>naturalCompare(a.mark,b.mark));
-  const modelMarksArr = [...MARKINDEX.keys()];
-  const modelMarks = new Set(modelMarksArr);
-  const notInModel = [...candidateTokens(upper)].filter(t => !modelMarks.has(t) && !modelMarksArr.some(mk => t.includes(mk))).sort(naturalCompare);
-  renderDelivery(notInModel);
-  els('colorBtn').disabled = lastMatched.length===0;
-}
-
-function renderDelivery(notInModel){
-  const totalPieces = lastMatched.reduce((s,m)=>s+m.count,0);
-  let html = `<div class="reslbl">Osumat: ${lastMatched.length} tunnusta / ${totalPieces} kokoonpanoa</div>`;
-  html += `<div class="chips">` + (lastMatched.length ? lastMatched.map(m=>`<span class="chip">${escapeHtml(m.mark)}${m.count>1?' ×'+m.count:''}</span>`).join('') : '<span style="color:#8a929c">Ei osumia</span>') + `</div>`;
-  if(notInModel && notInModel.length){
-    html += `<div class="reslbl">Rahtikirjassa mainittu, ei löytynyt mallista (${notInModel.length}) — tarkista:</div>`;
-    html += `<div class="chips">` + notInModel.slice(0,60).map(t=>`<span class="chip warn">${escapeHtml(t)}</span>`).join('') + (notInModel.length>60?' <span style="color:#8a929c">…</span>':'') + `</div>`;
-  }
-  els('delResults').innerHTML = html;
-}
-
-function parseNoteQuantities(rows){
-  // Lukee kultakin riviltä, jonka ensimmäinen sarake on mallin tunnus, Kogus/Qty-määrän (= toiseksi viimeinen numero)
-  const q = new Map();
-  if(!rows) return q;
-  for(const row of rows){
-    const toks = row.trim().split(/\s+/); if(!toks.length) continue;
-    const first = normMark(toks[0]);
-    if(!MARKINDEX.has(first)) continue;
-    const nums = row.match(/\d+(?:[.,]\d+)?/g) || [];
-    let qty = 1;
-    if(nums.length>=2){ const n = parseInt(String(nums[nums.length-2]).replace(',','.'),10); if(!isNaN(n) && n>0) qty = n; }
-    q.set(first, (q.get(first)||0) + qty);
-  }
-  return q;
-}
-function aggregateDelivered(){
-  DELIVERED = new Map();
-  for(const qm of NOTES.values()){ for(const [m,q] of qm){ DELIVERED.set(m, (DELIVERED.get(m)||0) + q); } }
-}
-function reconRows(){
-  return [...DELIVERED.keys()].map(mark=>{
-    const M = (MARKINDEX.get(mark)||[]).length, D = DELIVERED.get(mark);
-    return { mark, D, M, remaining: M-D, status: M===0 ? 'Ei mallissa' : (D>M ? 'YLITYS' : (D>=M ? 'Toimitettu' : 'Osittain')) };
-  }).sort((a,b)=>naturalCompare(a.mark,b.mark));
-}
-function renderRecon(){
-  const notes = [...NOTES.keys()];
-  els('loadedNotes').innerHTML = notes.length ? (`<div class="reslbl">Ladatut rahtikirjat (${notes.length}):</div><div class="chips">` + notes.map(n=>`<span class="chip">${escapeHtml(n)}</span>`).join('') + `</div>`) : '';
-  if(!DELIVERED.size){ els('reconTable').innerHTML=''; els('exportReconBtn').disabled=true; els('colorStatusBtn').disabled=true; return; }
-  const rows = reconRows();
-  const full = rows.filter(r=>r.status==='Toimitettu').length;
-  const part = rows.filter(r=>r.status==='Osittain').length;
-  const over = rows.filter(r=>r.status==='YLITYS').length;
-  const notm = rows.filter(r=>r.status==='Ei mallissa').length;
-  const undelivered = MARKINDEX.size - rows.filter(r=>r.M>0).length;
-  let html = `<div class="reslbl">Täsmäytys — ${full} täysin toimitettu, ${part} osittain${over?`, <span style="color:#c0392b">${over} YLITYS</span>`:''}${notm?`, ${notm} ei mallissa`:''}. Mallissa vielä toimittamatta ${undelivered} tunnusta.</div>`;
-  html += `<div class="tablewrap" style="max-height:40vh"><table><thead><tr><th>Tunnus</th><th class="num">Toimitettu</th><th class="num">Mallissa</th><th class="num">Jäljellä</th><th>Tila</th></tr></thead><tbody>`;
-  html += rows.map(r=>{
-    const col = r.status==='Toimitettu' ? '#1a7f37' : (r.status==='Osittain' ? '#b35900' : (r.status==='YLITYS' ? '#c0392b' : '#8a929c'));
-    return `<tr><td>${escapeHtml(r.mark)}</td><td class="num">${r.D}</td><td class="num">${r.M}</td><td class="num">${r.remaining}</td><td style="color:${col};font-weight:600">${r.status}</td></tr>`;
-  }).join('');
-  html += `</tbody></table></div>`;
-  els('reconTable').innerHTML = html;
-  els('exportReconBtn').disabled = false;
-  els('colorStatusBtn').disabled = false;
-}
-async function colorByStatus(){
-  if(!API || !DELIVERED.size) return;
-  const full = {}, part = {};
-  for(const [mark, D] of DELIVERED){
-    const refs = MARKINDEX.get(mark); if(!refs || !refs.length) continue;
-    const bucket = (D >= refs.length) ? full : part;
-    refs.forEach(r=>{ (bucket[r.modelId] ??= []).push(r.id); });
-  }
-  try{
-    for(const [modelId, ids] of Object.entries(full)) await API.viewer.setObjectState({ modelObjectIds:[{ modelId, objectRuntimeIds:ids }] }, { color:'#2e7d32' });
-    for(const [modelId, ids] of Object.entries(part)) await API.viewer.setObjectState({ modelObjectIds:[{ modelId, objectRuntimeIds:ids }] }, { color:'#ed6c02' });
-    const nf = Object.values(full).reduce((s,a)=>s+a.length,0), np = Object.values(part).reduce((s,a)=>s+a.length,0);
-    setDelStatus(`Väritetty: ${nf} kokoonpanoa vihreä (toimitettu), ${np} oranssi (osittain).`,'ok');
-  }catch(e){ setDelStatus('Väritys epäonnistui: '+e,'warn'); }
-}
-async function clearDeliveries(){
-  NOTES.clear(); DELIVERED = new Map(); lastPdfRows = null;
-  els('pdfName').textContent = '';
-  renderRecon();
-  els('delResults').innerHTML = '';
-  try{ if(API) await API.viewer.setObjectState(undefined, { color:'reset' }); }catch(e){}
-  setDelStatus('Toimitukset ja värit nollattu.','ok');
-}
-function exportRecon(){
-  if(!DELIVERED.size) return;
-  const cols = [{key:'mark',label:'Tunnus'},{key:'D',label:'Toimitettu'},{key:'M',label:'Mallissa'},{key:'remaining',label:'Jäljellä'},{key:'status',label:'Tila'}];
-  download('toimitukset_tasmaytys.csv', toCsv(reconRows(), cols), 'text/csv;charset=utf-8');
-}
-
-/* ===================== Asennussuunta: väritä linja kerrallaan ===================== */
-const lineOf = code => { if(code==null) return null; const m = String(code).match(/\d+/); return m ? parseInt(m[0],10) : null; };
-const setSuuntaStatus = (m,c) => { const s=els('suuntaStatus'); if(s){ s.textContent=m; s.className='hint'+(c?' status-'+c:''); } };
-
-function fillSelect(selId, defaults){
-  const names = new Set();
-  ALLASM.forEach(o => flattenProps(o).forEach(f => names.add(f.name)));
-  const sorted = [...names].sort(naturalCompare);
-  const sel = els(selId); const prev = sel.value; sel.innerHTML='';
-  const none=document.createElement('option'); none.value=''; none.textContent='— (ei mitään)'; sel.appendChild(none);
-  sorted.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
-  let pick='';
-  if(prev && sorted.includes(prev)) pick=prev;
-  else { for(const d of defaults){ const e=sorted.find(n=>n.toLowerCase()===d.toLowerCase()); if(e){pick=e;break;} } if(!pick) for(const d of defaults){ const c=sorted.find(n=>n.toLowerCase().includes(d.toLowerCase())); if(c){pick=c;break;} } }
-  sel.value = pick;
-}
-function buildLineIndex(){
-  LINEINDEX = new Map();
-  const field = els('fCode').value ? [els('fCode').value] : DEFAULTS.code;
-  let noCode = 0;
-  for(const o of ALLASM){
-    const line = lineOf(findProp(flattenProps(o), field));
-    if(line==null){ noCode++; continue; }
-    if(!LINEINDEX.has(line)) LINEINDEX.set(line, []);
-    LINEINDEX.get(line).push({ modelId:o.__modelId, id:o.id });
-  }
-  return noCode;
-}
-function orderedLines(){ const a=[...LINEINDEX.keys()].sort((x,y)=>x-y); return els('dirSel').value==='desc' ? a.reverse() : a; }
-function lineRangeLabel(){ const a=[...LINEINDEX.keys()]; return a.length ? `${a.length} linjaa (${Math.min(...a)}–${Math.max(...a)})` : '0 linjaa'; }
-
-async function setupSuunta(){
-  if(!scanned){ setSuuntaStatus('Luetaan malli…'); await scanAllAssemblies(); if(!scanned){ setSuuntaStatus('Ei mallia ladattuna 3D-katseluun. Avaa malli ensin.','warn'); return; } }
-  fillSelect('fCode', DEFAULTS.code);
-  const noCode = buildLineIndex();
-  els('linePill').textContent = lineRangeLabel();
-  const lines = [...LINEINDEX.keys()];
-  const slider = els('progress'); slider.max = lines.length; slider.value = 0; suuntaStep = 0;
-  if(!lines.length){ setSuuntaStatus('Linjoja ei löytynyt sijaintikoodista. Valitse oikea "Sijaintikoodi"-kenttä valikosta.','warn'); return; }
-  setSuuntaStatus(`${lines.length} linjaa luettu${noCode?` (${noCode} kokoonpanolla ei linjakoodia)`:''}. Liikuta liukusäädintä tai käytä Seuraava-nappia.`, 'ok');
-  applyProgress();
-}
-async function applyProgress(){
-  if(!API || !LINEINDEX.size) return;
-  const lines = orderedLines();
-  const installedLines = new Set(lines.slice(0, suuntaStep));
-  const inst={}, pend={};
-  for(const [line, refs] of LINEINDEX){ const b = installedLines.has(line) ? inst : pend; refs.forEach(r=>{ (b[r.modelId] ??= []).push(r.id); }); }
-  try{
-    await API.viewer.setObjectState(undefined, { color:'reset' });
-    for(const [mid, ids] of Object.entries(inst)) await API.viewer.setObjectState({ modelObjectIds:[{ modelId:mid, objectRuntimeIds:ids }] }, { color:'#2e7d32' });
-    if(els('dimPending').checked) for(const [mid, ids] of Object.entries(pend)) await API.viewer.setObjectState({ modelObjectIds:[{ modelId:mid, objectRuntimeIds:ids }] }, { color:'#d0d5db' });
-    const lastLine = suuntaStep>0 ? lines[suuntaStep-1] : null;
-    const nInst = Object.values(inst).reduce((s,a)=>s+a.length,0);
-    setSuuntaStatus(suuntaStep===0 ? 'Ei vielä asennettu — liikuta säädintä.' : `Asennettu linjaan ${lastLine} asti — ${suuntaStep}/${lines.length} linjaa, ${nInst} kokoonpanoa.`, 'ok');
-  }catch(e){ setSuuntaStatus('Väritys epäonnistui: '+e,'warn'); }
-}
-
-async function applyColor(){
-  if(!API || !lastMatched.length) return;
-  const hex = els('colorPick').value || '#2e7d32';
-  const byModel = {};
-  lastMatched.forEach(m => m.refs.forEach(r=>{ (byModel[r.modelId] ??= []).push(r.id); }));
-  const modelObjectIds = Object.entries(byModel).map(([modelId, objectRuntimeIds])=>({ modelId, objectRuntimeIds }));
-  try{
-    await API.viewer.setObjectState({ modelObjectIds }, { color: hex });
-    const n = modelObjectIds.reduce((s,m)=>s+m.objectRuntimeIds.length,0);
-    setDelStatus(`Väritettiin ${n} kokoonpanoa värillä ${hex}.`,'ok');
-  }catch(e){ setDelStatus('Väritys epäonnistui: '+e,'warn'); }
-}
-async function resetColors(){
-  if(!API) return;
-  try{ await API.viewer.setObjectState(undefined, { color:'reset' }); setDelStatus('Kaikki värit nollattu.','ok'); }
-  catch(e){ setDelStatus('Nollaus epäonnistui: '+e,'warn'); }
-}
-
 /* ===================== Kytkennät ===================== */
 els('capBtn').addEventListener('click', toggleCapture);
 els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
 els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); selectedKeys.clear(); anchorKey=null; deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
 els('clearSel').addEventListener('click', clearSelection);
-['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); if(id==='fMark' && scanned){ buildMarkIndex(); NOTES.clear(); DELIVERED=new Map(); if(lastPdfText) matchText(lastPdfText); renderRecon(); } }));
+['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); }));
 els('packBtn').addEventListener('click', ()=>{ autoPack(num(els('maxLoad').value)||24000); });
 els('clearLoads').addEventListener('click', ()=>{ RAW.forEach(o=>o.__load=''); deriveRows(); render(); });
 els('csvAs').addEventListener('click', ()=>exportCsv('as'));
@@ -1016,54 +612,11 @@ els('xlsAs').addEventListener('click', ()=>exportXlsx('as'));
 els('xlsRa').addEventListener('click', ()=>exportXlsx('ra'));
 els('printAs').addEventListener('click', ()=>{ showTab('asennus'); setTimeout(()=>window.print(),120); });
 els('printRa').addEventListener('click', ()=>{ showTab('rahti'); setTimeout(()=>window.print(),120); });
-els('scanBtn').addEventListener('click', scanAllAssemblies);
-els('colorBtn').addEventListener('click', applyColor);
-els('resetColorBtn').addEventListener('click', resetColors);
-els('colorStatusBtn').addEventListener('click', colorByStatus);
-els('clearDeliveriesBtn').addEventListener('click', clearDeliveries);
-els('exportReconBtn').addEventListener('click', exportRecon);
-els('scanBtn2').addEventListener('click', setupSuunta);
-els('fCode').addEventListener('change', ()=>{ const noCode=buildLineIndex(); els('linePill').textContent=lineRangeLabel(); const n=[...LINEINDEX.keys()].length; els('progress').max=n; if(suuntaStep>n){ suuntaStep=n; els('progress').value=n; } if(!n){ setSuuntaStatus('Linjoja ei löytynyt tästä kentästä.','warn'); } else { setSuuntaStatus(`${n} linjaa${noCode?` (${noCode} ilman koodia)`:''}.`,'ok'); } applyProgress(); });
-els('dirSel').addEventListener('change', applyProgress);
-els('dimPending').addEventListener('change', applyProgress);
-els('prevLine').addEventListener('click', ()=>{ if(suuntaStep>0){ suuntaStep--; els('progress').value=suuntaStep; applyProgress(); } });
-els('nextLine').addEventListener('click', ()=>{ const mx=+els('progress').max; if(suuntaStep<mx){ suuntaStep++; els('progress').value=suuntaStep; applyProgress(); } });
-els('progress').addEventListener('input', ()=>{ suuntaStep=+els('progress').value; applyProgress(); });
-els('resetSuunta').addEventListener('click', async ()=>{ try{ if(API) await API.viewer.setObjectState(undefined,{ color:'reset' }); }catch(e){} setSuuntaStatus('Värit nollattu.'); });
-els('pdfInput').addEventListener('change', async (e)=>{
-  const file = e.target.files && e.target.files[0]; if(!file) return;
-  els('pdfName').textContent = file.name;
-  els('colorBtn').disabled = true;
-  try{
-    if(!scanned) await scanAllAssemblies();
-    if(!scanned) return;
-    setDelStatus('Käsitellään PDF:ää…');
-    const { text, rows, ocr } = await extractPdfText(file);
-    lastPdfText = text; lastPdfRows = rows;
-    matchText(text);   // läsnäolo -> lastMatched + sirut + yhden värin nappi
-    // Määrät: lue Qty-sarake ja liitä osumiin (oletus 1 jos ei löydy)
-    const nq = parseNoteQuantities(rows);
-    const noteMap = new Map();
-    lastMatched.forEach(m=>{ noteMap.set(m.mark, nq.get(m.mark) ?? 1); });
-    NOTES.set(file.name, noteMap);   // sama tiedostonimi korvaa -> ei tuplalaskentaa
-    aggregateDelivered();
-    renderRecon();
-    if(lastMatched.length){
-      const pcs = [...noteMap.values()].reduce((s,v)=>s+v,0);
-      setDelStatus(`Valmis${ocr?' (OCR)':''}: ${lastMatched.length} tunnusta, ${pcs} kpl tässä rahtikirjassa. Katso täsmäytys alta ja "Väritä tilan mukaan".`,'ok');
-    } else {
-      setDelStatus(`PDF luettu${ocr?' (OCR)':''}, mutta yhtään mallin tunnusta ei löytynyt. Tarkista, että "Tunnus"-kenttä (yläreunassa) osoittaa oikeaan ominaisuuteen.`,'warn');
-    }
-  }catch(err){ setDelStatus('Virhe: '+(err&&err.message||err),'warn'); }
-  finally{ e.target.value=''; }
-});
 document.querySelectorAll('.tab').forEach(t=> t.addEventListener('click', ()=> showTab(t.dataset.tab)));
 function showTab(name){
   document.querySelectorAll('.tab').forEach(t=> t.classList.toggle('active', t.dataset.tab===name));
   els('tab-asennus').style.display = name==='asennus' ? 'block':'none';
   els('tab-rahti').style.display   = name==='rahti'   ? 'block':'none';
-  els('tab-toimitus').style.display = name==='toimitus' ? 'block':'none';
-  els('tab-suunta').style.display = name==='suunta' ? 'block':'none';
 }
 
 connect();
