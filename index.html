@@ -663,25 +663,47 @@ async function scanAllAssemblies(){
   if(!API){ setDelStatus('Ei yhteyttä Trimble Connectiin.','warn'); return; }
   els('scanBtn').disabled = true;
   try{
-    setDelStatus('Luetaan mallin objekteja…');
+    setDelStatus('Luetaan mallin objektit…');
     const all = await API.viewer.getObjects();
-    const perModel = all.map(m=>({ modelId:m.modelId, ids:(m.objects||[]).filter(o=> o.class && String(o.class).toUpperCase().replace(/\s/g,'')==='IFCELEMENTASSEMBLY').map(o=>o.id) })).filter(m=>m.ids.length);
-    if(!perModel.length){ setDelStatus('Kokoonpanoja (IfcElementAssembly) ei löytynyt mallista.','warn'); els('scanPill').textContent='0 kokoonpanoa'; els('scanBtn').disabled=false; return; }
-    const total = perModel.reduce((s,m)=>s+m.ids.length,0);
-    ALLASM = []; let done=0; const B=400;
-    for(const m of perModel){
+    const totalObjects = all.reduce((s,m)=>s+((m.objects||[]).length),0);
+    if(totalObjects===0){ setDelStatus('Ei mallia ladattuna 3D-katseluun (tai malli on tyhjä). Avaa IFC-malli ensin.','warn'); els('scanPill').textContent='0 kokoonpanoa'; els('scanBtn').disabled=false; return; }
+
+    // getObjects ei aina palauta luokkatietoa -> jos ei, haetaan objektien ominaisuudet ja suodatetaan niistä
+    const isAsmClass = c => c && String(c).toUpperCase().replace(/\s/g,'')==='IFCELEMENTASSEMBLY';
+    const hasClass = all.some(m => (m.objects||[]).some(o => o.class));
+    let target;
+    if(hasClass){
+      target = all.map(m=>({ modelId:m.modelId, ids:(m.objects||[]).filter(o=>isAsmClass(o.class)).map(o=>o.id) })).filter(m=>m.ids.length);
+      if(!target.length) target = all.map(m=>({ modelId:m.modelId, ids:(m.objects||[]).map(o=>o.id) })).filter(m=>m.ids.length);
+    } else {
+      target = all.map(m=>({ modelId:m.modelId, ids:(m.objects||[]).map(o=>o.id) })).filter(m=>m.ids.length);
+    }
+
+    const total = target.reduce((s,m)=>s+m.ids.length,0);
+    if(total>15000) setDelStatus(`Isohko malli (${total} objektia) — luku voi kestää hetken…`);
+    ALLASM = []; let done=0; const B=500;
+    for(const m of target){
       for(let i=0;i<m.ids.length;i+=B){
         const chunk = m.ids.slice(i,i+B);
         let props=[]; try{ props = await API.viewer.getObjectProperties(m.modelId, chunk); }catch(e){}
         props.forEach(p=>{ p.__modelId=m.modelId; ALLASM.push(p); });
-        done += chunk.length; setDelStatus(`Luetaan kokoonpanoja… ${done}/${total}`);
+        done += chunk.length; setDelStatus(`Luetaan ominaisuuksia… ${done}/${total}`);
       }
     }
+
+    // Luokka saadaan luotettavasti getObjectProperties-kutsusta; suodata kokoonpanoihin, muuten käytä kaikkia
+    const asmOnly = ALLASM.filter(p => isAsmClass(p.class));
+    let note = '';
+    if(asmOnly.length){ ALLASM = asmOnly; }
+    else { note = ' — huom: IfcElementAssembly-luokkaa ei löytynyt, käytössä kaikki objektit'; }
+
     mergeSelectors(ALLASM);
     buildMarkIndex();
     scanned = true;
-    els('scanPill').textContent = `${ALLASM.length} kokoonpanoa, ${MARKINDEX.size} tunnusta`;
-    setDelStatus(`Malli luettu: ${ALLASM.length} kokoonpanoa, ${MARKINDEX.size} eri tunnusta.`,'ok');
+    const unit = asmOnly.length ? 'kokoonpanoa' : 'objektia';
+    els('scanPill').textContent = `${ALLASM.length} ${unit}, ${MARKINDEX.size} tunnusta`;
+    if(MARKINDEX.size===0) setDelStatus(`Luettu ${ALLASM.length} ${unit}, mutta tunnuksia ei löytynyt valitulla kentällä. Valitse yläreunan "Tunnus"-valikosta oikea ominaisuus.${note}`,'warn');
+    else setDelStatus(`Malli luettu: ${ALLASM.length} ${unit}, ${MARKINDEX.size} eri tunnusta${note}.`,'ok');
   }catch(e){ setDelStatus('Virhe mallia luettaessa: '+e,'warn'); }
   finally{ els('scanBtn').disabled = false; }
 }
