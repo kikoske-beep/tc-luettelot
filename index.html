@@ -53,6 +53,11 @@
   .status-ok{ color:var(--ok); } .status-warn{ color:var(--warn); }
   .pill{ display:inline-block; background:#eef4fa; color:var(--blue); border-radius:20px; padding:2px 10px; font-size:12px; }
   .empty{ padding:26px; text-align:center; color:#8a929c; }
+  .chip{ display:inline-block; background:#eef4fa; color:#12507e; border:1px solid #cfe0ef; border-radius:14px; padding:2px 9px; font-size:12px; margin:2px 3px; }
+  .chip.warn{ background:#fff3e6; color:#8a4b00; border-color:#f0d3ad; }
+  .chips{ margin:6px 0 2px; max-height:160px; overflow:auto; }
+  .reslbl{ font-size:12px; color:#556; font-weight:600; margin-top:10px; }
+  input[type=color]{ border:1px solid #c7ccd4; border-radius:6px; background:#fff; }
   .hint{ color:#788; font-size:11.5px; margin:8px 0 4px; }
   @media print{
     header,.panel.controls,.tabs .tab:not(.active),.row-actions,.drag,.col3d,.actcol,.no-print{ display:none !important; }
@@ -104,6 +109,7 @@
   <div class="tabs">
     <button class="tab active" data-tab="asennus">Asennusjärjestys</button>
     <button class="tab" data-tab="rahti">Rahtiluettelo</button>
+    <button class="tab" data-tab="toimitus">Toimitukset</button>
   </div>
 
   <!-- ASENNUSJÄRJESTYS -->
@@ -175,6 +181,34 @@
         <tfoot id="footSum"></tfoot>
       </table>
     </div>
+  </div>
+
+  <!-- TOIMITUKSET (PDF-rahtikirja -> väritys) -->
+  <div class="panel" id="tab-toimitus" style="display:none">
+    <p class="hint no-print" style="margin-top:0">Lataa rahtikirja (PDF), niin työkalu etsii siitä mallin kokoonpanotunnukset ja värittää osumat mallissa — näet mitä on toimitettu tai tulossa. Toimii sekä tekstipohjaisilla että skannatuilla PDF:illä (skannatuille tehdään tekstintunnistus).</p>
+    <div class="row-actions">
+      <button class="btn sec" id="scanBtn">Lue mallin kokoonpanot</button>
+      <span class="pill" id="scanPill">ei luettu</span>
+    </div>
+    <div class="row-actions" style="margin-top:10px">
+      <label class="btn" style="position:relative;overflow:hidden">Valitse rahtikirja (PDF)
+        <input type="file" id="pdfInput" accept="application/pdf,.pdf" style="position:absolute;inset:0;opacity:0;cursor:pointer">
+      </label>
+      <span id="pdfName" style="font-size:12px;color:#667"></span>
+    </div>
+    <div class="row-actions" style="margin-top:10px">
+      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Väri
+        <input type="color" id="colorPick" value="#2e7d32" style="width:46px;height:32px;padding:2px">
+      </label>
+      <button class="mini" data-color="#2e7d32">Toimitettu</button>
+      <button class="mini" data-color="#ed6c02">Menossa</button>
+      <button class="mini" data-color="#1565c0">Asennettu</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="colorBtn" disabled>Väritä osumat</button>
+      <button class="btn sec" id="resetColorBtn">Nollaa värit</button>
+    </div>
+    <div id="delStatus" class="hint" style="min-height:16px"></div>
+    <div id="delResults"></div>
   </div>
 </div>
 
@@ -341,9 +375,10 @@ async function onPick(sel){
 }
 
 /* ===================== Kenttävalinnat ===================== */
-function mergeSelectors(){
+function mergeSelectors(source){
+  const src = source || RAW;
   const names = new Set();
-  RAW.forEach(o => flattenProps(o).forEach(f => names.add(f.name)));
+  src.forEach(o => flattenProps(o).forEach(f => names.add(f.name)));
   const sorted = [...names].sort(naturalCompare);
   const fill = (selId, defaults) => {
     const sel = els(selId);
@@ -471,7 +506,7 @@ function wireAsennus(){
   tb.querySelectorAll('tr').forEach(tr=>{
     const handle = tr.querySelector('.drag');
     if(handle){
-      handle.addEventListener('dragstart', e=>{ dragIdx=+tr.dataset.idx; tr.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+      handle.addEventListener('dragstart', e=>{ dragIdx=+tr.dataset.idx; tr.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; try{ e.dataTransfer.setData('text/plain', String(dragIdx)); }catch(_){} });
       handle.addEventListener('dragend', ()=>{ tr.classList.remove('dragging'); tb.querySelectorAll('tr').forEach(t=>t.classList.remove('dragover')); });
     }
     tr.addEventListener('dragover', e=>{ e.preventDefault(); tr.classList.add('dragover'); });
@@ -597,12 +632,174 @@ async function exportXlsx(which){
 }
 function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
+/* ===================== Toimitukset: PDF-rahtikirja -> tunnukset -> väritys ===================== */
+let ALLASM = [];              // kaikki mallin kokoonpanot (ObjectProperties + __modelId)
+let MARKINDEX = new Map();    // normalisoitu tunnus -> [{modelId,id}]
+let scanned = false;
+let lastMatched = [];         // [{mark, count, refs:[{modelId,id}]}]
+let lastPdfText = '';
+
+const normMark = s => String(s==null?'':s).trim().toUpperCase();
+function escapeRegex(s){ return s.replace(/[.*+?^${}()|[\]\\/-]/g,'\\$&'); }
+function markFound(mark, upperText){
+  // tiukka: tunnus omana "sanana"
+  if(new RegExp('(?:^|[^A-Z0-9])'+escapeRegex(mark)+'(?:$|[^A-Z0-9])').test(upperText)) return true;
+  // löysä: erottuville tunnuksille (>=5 merkkiä, sis. kirjaimen ja numeron) sallitaan edeltävä liimautunut merkki,
+  // mutta perässä oltava ei-alfanumeerinen -> löytää esim. "117.34CB1023" ilman että "4CB102" osuu "4CB1023":een
+  if(mark.length>=5 && /[A-Z]/.test(mark) && /[0-9]/.test(mark) && new RegExp(escapeRegex(mark)+'(?![A-Z0-9])').test(upperText)) return true;
+  return false;
+}
+function candidateTokens(upperText){
+  const set = new Set();
+  (upperText||'').split(/[\s,;|()\[\]{}<>"'!?*=]+/).forEach(t=>{
+    t = t.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g,'');
+    if(t.length>=2 && t.length<=14 && /[A-Z]/.test(t) && /[0-9]/.test(t) && /^[A-Z0-9/._-]+$/.test(t)) set.add(t);
+  });
+  return set;
+}
+function setDelStatus(m,c){ const s=els('delStatus'); if(s){ s.textContent=m; s.className='hint'+(c?' status-'+c:''); } }
+
+async function scanAllAssemblies(){
+  if(!API){ setDelStatus('Ei yhteyttä Trimble Connectiin.','warn'); return; }
+  els('scanBtn').disabled = true;
+  try{
+    setDelStatus('Luetaan mallin objekteja…');
+    const all = await API.viewer.getObjects();
+    const perModel = all.map(m=>({ modelId:m.modelId, ids:(m.objects||[]).filter(o=> o.class && String(o.class).toUpperCase().replace(/\s/g,'')==='IFCELEMENTASSEMBLY').map(o=>o.id) })).filter(m=>m.ids.length);
+    if(!perModel.length){ setDelStatus('Kokoonpanoja (IfcElementAssembly) ei löytynyt mallista.','warn'); els('scanPill').textContent='0 kokoonpanoa'; els('scanBtn').disabled=false; return; }
+    const total = perModel.reduce((s,m)=>s+m.ids.length,0);
+    ALLASM = []; let done=0; const B=400;
+    for(const m of perModel){
+      for(let i=0;i<m.ids.length;i+=B){
+        const chunk = m.ids.slice(i,i+B);
+        let props=[]; try{ props = await API.viewer.getObjectProperties(m.modelId, chunk); }catch(e){}
+        props.forEach(p=>{ p.__modelId=m.modelId; ALLASM.push(p); });
+        done += chunk.length; setDelStatus(`Luetaan kokoonpanoja… ${done}/${total}`);
+      }
+    }
+    mergeSelectors(ALLASM);
+    buildMarkIndex();
+    scanned = true;
+    els('scanPill').textContent = `${ALLASM.length} kokoonpanoa, ${MARKINDEX.size} tunnusta`;
+    setDelStatus(`Malli luettu: ${ALLASM.length} kokoonpanoa, ${MARKINDEX.size} eri tunnusta.`,'ok');
+  }catch(e){ setDelStatus('Virhe mallia luettaessa: '+e,'warn'); }
+  finally{ els('scanBtn').disabled = false; }
+}
+
+function buildMarkIndex(){
+  MARKINDEX = new Map();
+  const map = currentMap();
+  for(const o of ALLASM){
+    const m = normMark(findProp(flattenProps(o), map.mark));
+    if(!m) continue;
+    if(!MARKINDEX.has(m)) MARKINDEX.set(m, []);
+    MARKINDEX.get(m).push({ modelId:o.__modelId, id:o.id });
+  }
+}
+
+let PDFJS_READY = null;
+function loadPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(true);
+  if(PDFJS_READY) return PDFJS_READY;
+  PDFJS_READY = new Promise(res=>{
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+    s.onload=()=>{ try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js'; }catch(e){} res(true); };
+    s.onerror=()=>res(false);
+    document.head.appendChild(s);
+  });
+  return PDFJS_READY;
+}
+let TESS_READY = null;
+function loadTesseract(){
+  if(window.Tesseract) return Promise.resolve(true);
+  if(TESS_READY) return TESS_READY;
+  TESS_READY = new Promise(res=>{
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js';
+    s.onload=()=>res(true); s.onerror=()=>res(false);
+    document.head.appendChild(s);
+  });
+  return TESS_READY;
+}
+
+async function extractPdfText(file){
+  const ok = await loadPdfJs();
+  if(!ok || !window.pdfjsLib) throw new Error('PDF-kirjaston lataus epäonnistui');
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  let text = '';
+  for(let p=1;p<=pdf.numPages;p++){
+    setDelStatus(`Luetaan PDF-tekstiä… sivu ${p}/${pdf.numPages}`);
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    text += ' ' + tc.items.map(it=>it.str).join(' ');
+  }
+  if(text.replace(/\s/g,'').length >= 8) return { text, ocr:false };
+  // Skannattu PDF -> tekstintunnistus
+  setDelStatus('PDF näyttää skannatulta — käynnistetään tekstintunnistus (OCR). Tämä voi kestää hetken…');
+  const okT = await loadTesseract();
+  if(!okT || !window.Tesseract) throw new Error('Tekstiä ei löytynyt eikä OCR-kirjastoa saatu ladattua');
+  let otext = '';
+  for(let p=1;p<=pdf.numPages;p++){
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas'); canvas.width=viewport.width; canvas.height=viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    setDelStatus(`Tekstintunnistus… sivu ${p}/${pdf.numPages}`);
+    try{ const r = await window.Tesseract.recognize(canvas, 'eng'); otext += ' ' + ((r&&r.data&&r.data.text)||''); }catch(e){}
+  }
+  return { text: otext, ocr:true };
+}
+
+function matchText(text){
+  if(!scanned || !MARKINDEX.size){ setDelStatus('Lue ensin mallin kokoonpanot.','warn'); return; }
+  const upper = (text||'').toUpperCase();
+  lastMatched = [];
+  for(const [mark, refs] of MARKINDEX){ if(markFound(mark, upper)) lastMatched.push({ mark, count:refs.length, refs }); }
+  lastMatched.sort((a,b)=>naturalCompare(a.mark,b.mark));
+  const modelMarksArr = [...MARKINDEX.keys()];
+  const modelMarks = new Set(modelMarksArr);
+  const notInModel = [...candidateTokens(upper)].filter(t => !modelMarks.has(t) && !modelMarksArr.some(mk => t.includes(mk))).sort(naturalCompare);
+  renderDelivery(notInModel);
+  els('colorBtn').disabled = lastMatched.length===0;
+}
+
+function renderDelivery(notInModel){
+  const totalPieces = lastMatched.reduce((s,m)=>s+m.count,0);
+  let html = `<div class="reslbl">Osumat: ${lastMatched.length} tunnusta / ${totalPieces} kokoonpanoa</div>`;
+  html += `<div class="chips">` + (lastMatched.length ? lastMatched.map(m=>`<span class="chip">${escapeHtml(m.mark)}${m.count>1?' ×'+m.count:''}</span>`).join('') : '<span style="color:#8a929c">Ei osumia</span>') + `</div>`;
+  if(notInModel && notInModel.length){
+    html += `<div class="reslbl">Rahtikirjassa mainittu, ei löytynyt mallista (${notInModel.length}) — tarkista:</div>`;
+    html += `<div class="chips">` + notInModel.slice(0,60).map(t=>`<span class="chip warn">${escapeHtml(t)}</span>`).join('') + (notInModel.length>60?' <span style="color:#8a929c">…</span>':'') + `</div>`;
+  }
+  els('delResults').innerHTML = html;
+}
+
+async function applyColor(){
+  if(!API || !lastMatched.length) return;
+  const hex = els('colorPick').value || '#2e7d32';
+  const byModel = {};
+  lastMatched.forEach(m => m.refs.forEach(r=>{ (byModel[r.modelId] ??= []).push(r.id); }));
+  const modelObjectIds = Object.entries(byModel).map(([modelId, objectRuntimeIds])=>({ modelId, objectRuntimeIds }));
+  try{
+    await API.viewer.setObjectState({ modelObjectIds }, { color: hex });
+    const n = modelObjectIds.reduce((s,m)=>s+m.objectRuntimeIds.length,0);
+    setDelStatus(`Väritettiin ${n} kokoonpanoa värillä ${hex}.`,'ok');
+  }catch(e){ setDelStatus('Väritys epäonnistui: '+e,'warn'); }
+}
+async function resetColors(){
+  if(!API) return;
+  try{ await API.viewer.setObjectState(undefined, { color:'reset' }); setDelStatus('Kaikki värit nollattu.','ok'); }
+  catch(e){ setDelStatus('Nollaus epäonnistui: '+e,'warn'); }
+}
+
 /* ===================== Kytkennät ===================== */
 els('capBtn').addEventListener('click', toggleCapture);
 els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
 els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); selectedKeys.clear(); anchorKey=null; deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
 els('clearSel').addEventListener('click', clearSelection);
-['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); }));
+['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); if(id==='fMark' && scanned){ buildMarkIndex(); if(lastPdfText) matchText(lastPdfText); } }));
 els('packBtn').addEventListener('click', ()=>{ autoPack(num(els('maxLoad').value)||24000); });
 els('clearLoads').addEventListener('click', ()=>{ RAW.forEach(o=>o.__load=''); deriveRows(); render(); });
 els('csvAs').addEventListener('click', ()=>exportCsv('as'));
@@ -611,11 +808,32 @@ els('xlsAs').addEventListener('click', ()=>exportXlsx('as'));
 els('xlsRa').addEventListener('click', ()=>exportXlsx('ra'));
 els('printAs').addEventListener('click', ()=>{ showTab('asennus'); setTimeout(()=>window.print(),120); });
 els('printRa').addEventListener('click', ()=>{ showTab('rahti'); setTimeout(()=>window.print(),120); });
+els('scanBtn').addEventListener('click', scanAllAssemblies);
+els('colorBtn').addEventListener('click', applyColor);
+els('resetColorBtn').addEventListener('click', resetColors);
+document.querySelectorAll('#tab-toimitus [data-color]').forEach(b=> b.addEventListener('click', ()=>{ els('colorPick').value = b.dataset.color; }));
+els('pdfInput').addEventListener('change', async (e)=>{
+  const file = e.target.files && e.target.files[0]; if(!file) return;
+  els('pdfName').textContent = file.name;
+  els('colorBtn').disabled = true;
+  try{
+    if(!scanned) await scanAllAssemblies();
+    if(!scanned) return;
+    setDelStatus('Käsitellään PDF:ää…');
+    const { text, ocr } = await extractPdfText(file);
+    lastPdfText = text;
+    matchText(text);
+    if(lastMatched.length) setDelStatus(`Valmis${ocr?' (OCR)':''}. Löytyi ${lastMatched.length} tunnusta. Valitse väri ja paina "Väritä osumat".`,'ok');
+    else setDelStatus(`PDF luettu${ocr?' (OCR)':''}, mutta yhtään mallin tunnusta ei löytynyt. Tarkista, että "Tunnus"-kenttä (yläreunassa) osoittaa oikeaan ominaisuuteen.`,'warn');
+  }catch(err){ setDelStatus('Virhe: '+(err&&err.message||err),'warn'); }
+  finally{ e.target.value=''; }
+});
 document.querySelectorAll('.tab').forEach(t=> t.addEventListener('click', ()=> showTab(t.dataset.tab)));
 function showTab(name){
   document.querySelectorAll('.tab').forEach(t=> t.classList.toggle('active', t.dataset.tab===name));
   els('tab-asennus').style.display = name==='asennus' ? 'block':'none';
   els('tab-rahti').style.display   = name==='rahti'   ? 'block':'none';
+  els('tab-toimitus').style.display = name==='toimitus' ? 'block':'none';
 }
 
 connect();
