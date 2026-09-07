@@ -71,7 +71,7 @@
 <header>
   Trutec – Asennus- &amp; rahtiluettelot
   <small id="projname"></small>
-  <span style="margin-left:auto;font-size:11px;opacity:.75">v8</span>
+  <span style="margin-left:auto;font-size:11px;opacity:.75">v9</span>
 </header>
 
 <div class="wrap">
@@ -111,6 +111,7 @@
     <button class="tab active" data-tab="asennus">Asennusjärjestys</button>
     <button class="tab" data-tab="rahti">Rahtiluettelo</button>
     <button class="tab" data-tab="toimitus">Toimitukset</button>
+    <button class="tab" data-tab="suunta">Asennussuunta</button>
   </div>
 
   <!-- ASENNUSJÄRJESTYS -->
@@ -216,6 +217,36 @@
     <div id="reconTable"></div>
     <div id="delResults"></div>
   </div>
+
+  <!-- ASENNUSSUUNTA (väritä linja kerrallaan ruudukon mukaan) -->
+  <div class="panel" id="tab-suunta" style="display:none">
+    <p class="hint no-print" style="margin-top:0">Väritä malli asennuksen etenemisen mukaan, linja kerrallaan ruudukon mukaan (esim. linjalta 1 eteenpäin). Linjatieto luetaan sijaintikoodista (esim. "7/A" → linja 7).</p>
+    <div class="row-actions">
+      <button class="btn sec" id="scanBtn2">Lue linjat mallista</button>
+      <span class="pill" id="linePill">ei luettu</span>
+      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Sijaintikoodi
+        <select id="fCode" style="min-width:180px"></select>
+      </label>
+    </div>
+    <div class="row-actions" style="margin-top:10px">
+      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Suunta
+        <select id="dirSel">
+          <option value="asc">Linja 1 → suurin</option>
+          <option value="desc">Suurin → linja 1</option>
+        </select>
+      </label>
+      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">
+        <input type="checkbox" id="dimPending" checked style="width:auto"> Näytä asentamattomat harmaana
+      </label>
+    </div>
+    <div class="row-actions" style="margin-top:10px">
+      <button class="btn sec" id="prevLine">‹ Edellinen</button>
+      <input type="range" id="progress" min="0" max="0" value="0" style="flex:1;min-width:120px">
+      <button class="btn" id="nextLine">Seuraava ›</button>
+    </div>
+    <div id="suuntaStatus" class="hint" style="min-height:16px"></div>
+    <div class="row-actions"><button class="btn sec" id="resetSuunta">Nollaa värit</button></div>
+  </div>
 </div>
 
 <script>
@@ -265,6 +296,7 @@ const DEFAULTS = {
   profile:['Profile','PROFILE','Section','Cross section','Cross-section','Profiili'],
   material:['Material','MATERIAL','Grade','Steel grade','Materiaali','Laatu'],
   length: ['Length','LENGTH','Cut length','Nettopituus','Pituus'],
+  code: ['Assembly/Cast unit position code','Cast unit position code','Assembly position code','Position code','ASSEMBLY_POS_CODE','Position'],
 };
 
 /* ===================== Tila ===================== */
@@ -647,6 +679,8 @@ let lastPdfText = '';
 let lastPdfRows = null;       // rekonstruoidut PDF-rivit (määrien lukua varten)
 let NOTES = new Map();        // rahtikirja (nimi) -> Map(tunnus -> kpl)
 let DELIVERED = new Map();    // tunnus -> toimitettu kpl yhteensä (kaikki rahtikirjat)
+let LINEINDEX = new Map();    // linjanumero -> [{modelId,id}]  (asennussuunta)
+let suuntaStep = 0;           // montako linjaa "asennettu"
 
 const normMark = s => String(s==null?'':s).trim().toUpperCase();
 function escapeRegex(s){ return s.replace(/[.*+?^${}()|[\]\\/-]/g,'\\$&'); }
@@ -892,6 +926,64 @@ function exportRecon(){
   download('toimitukset_tasmaytys.csv', toCsv(reconRows(), cols), 'text/csv;charset=utf-8');
 }
 
+/* ===================== Asennussuunta: väritä linja kerrallaan ===================== */
+const lineOf = code => { if(code==null) return null; const m = String(code).match(/\d+/); return m ? parseInt(m[0],10) : null; };
+const setSuuntaStatus = (m,c) => { const s=els('suuntaStatus'); if(s){ s.textContent=m; s.className='hint'+(c?' status-'+c:''); } };
+
+function fillSelect(selId, defaults){
+  const names = new Set();
+  ALLASM.forEach(o => flattenProps(o).forEach(f => names.add(f.name)));
+  const sorted = [...names].sort(naturalCompare);
+  const sel = els(selId); const prev = sel.value; sel.innerHTML='';
+  const none=document.createElement('option'); none.value=''; none.textContent='— (ei mitään)'; sel.appendChild(none);
+  sorted.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+  let pick='';
+  if(prev && sorted.includes(prev)) pick=prev;
+  else { for(const d of defaults){ const e=sorted.find(n=>n.toLowerCase()===d.toLowerCase()); if(e){pick=e;break;} } if(!pick) for(const d of defaults){ const c=sorted.find(n=>n.toLowerCase().includes(d.toLowerCase())); if(c){pick=c;break;} } }
+  sel.value = pick;
+}
+function buildLineIndex(){
+  LINEINDEX = new Map();
+  const field = els('fCode').value ? [els('fCode').value] : DEFAULTS.code;
+  let noCode = 0;
+  for(const o of ALLASM){
+    const line = lineOf(findProp(flattenProps(o), field));
+    if(line==null){ noCode++; continue; }
+    if(!LINEINDEX.has(line)) LINEINDEX.set(line, []);
+    LINEINDEX.get(line).push({ modelId:o.__modelId, id:o.id });
+  }
+  return noCode;
+}
+function orderedLines(){ const a=[...LINEINDEX.keys()].sort((x,y)=>x-y); return els('dirSel').value==='desc' ? a.reverse() : a; }
+function lineRangeLabel(){ const a=[...LINEINDEX.keys()]; return a.length ? `${a.length} linjaa (${Math.min(...a)}–${Math.max(...a)})` : '0 linjaa'; }
+
+async function setupSuunta(){
+  if(!scanned){ setSuuntaStatus('Luetaan malli…'); await scanAllAssemblies(); if(!scanned){ setSuuntaStatus('Ei mallia ladattuna 3D-katseluun. Avaa malli ensin.','warn'); return; } }
+  fillSelect('fCode', DEFAULTS.code);
+  const noCode = buildLineIndex();
+  els('linePill').textContent = lineRangeLabel();
+  const lines = [...LINEINDEX.keys()];
+  const slider = els('progress'); slider.max = lines.length; slider.value = 0; suuntaStep = 0;
+  if(!lines.length){ setSuuntaStatus('Linjoja ei löytynyt sijaintikoodista. Valitse oikea "Sijaintikoodi"-kenttä valikosta.','warn'); return; }
+  setSuuntaStatus(`${lines.length} linjaa luettu${noCode?` (${noCode} kokoonpanolla ei linjakoodia)`:''}. Liikuta liukusäädintä tai käytä Seuraava-nappia.`, 'ok');
+  applyProgress();
+}
+async function applyProgress(){
+  if(!API || !LINEINDEX.size) return;
+  const lines = orderedLines();
+  const installedLines = new Set(lines.slice(0, suuntaStep));
+  const inst={}, pend={};
+  for(const [line, refs] of LINEINDEX){ const b = installedLines.has(line) ? inst : pend; refs.forEach(r=>{ (b[r.modelId] ??= []).push(r.id); }); }
+  try{
+    await API.viewer.setObjectState(undefined, { color:'reset' });
+    for(const [mid, ids] of Object.entries(inst)) await API.viewer.setObjectState({ modelObjectIds:[{ modelId:mid, objectRuntimeIds:ids }] }, { color:'#2e7d32' });
+    if(els('dimPending').checked) for(const [mid, ids] of Object.entries(pend)) await API.viewer.setObjectState({ modelObjectIds:[{ modelId:mid, objectRuntimeIds:ids }] }, { color:'#d0d5db' });
+    const lastLine = suuntaStep>0 ? lines[suuntaStep-1] : null;
+    const nInst = Object.values(inst).reduce((s,a)=>s+a.length,0);
+    setSuuntaStatus(suuntaStep===0 ? 'Ei vielä asennettu — liikuta säädintä.' : `Asennettu linjaan ${lastLine} asti — ${suuntaStep}/${lines.length} linjaa, ${nInst} kokoonpanoa.`, 'ok');
+  }catch(e){ setSuuntaStatus('Väritys epäonnistui: '+e,'warn'); }
+}
+
 async function applyColor(){
   if(!API || !lastMatched.length) return;
   const hex = els('colorPick').value || '#2e7d32';
@@ -930,6 +1022,14 @@ els('resetColorBtn').addEventListener('click', resetColors);
 els('colorStatusBtn').addEventListener('click', colorByStatus);
 els('clearDeliveriesBtn').addEventListener('click', clearDeliveries);
 els('exportReconBtn').addEventListener('click', exportRecon);
+els('scanBtn2').addEventListener('click', setupSuunta);
+els('fCode').addEventListener('change', ()=>{ const noCode=buildLineIndex(); els('linePill').textContent=lineRangeLabel(); const n=[...LINEINDEX.keys()].length; els('progress').max=n; if(suuntaStep>n){ suuntaStep=n; els('progress').value=n; } if(!n){ setSuuntaStatus('Linjoja ei löytynyt tästä kentästä.','warn'); } else { setSuuntaStatus(`${n} linjaa${noCode?` (${noCode} ilman koodia)`:''}.`,'ok'); } applyProgress(); });
+els('dirSel').addEventListener('change', applyProgress);
+els('dimPending').addEventListener('change', applyProgress);
+els('prevLine').addEventListener('click', ()=>{ if(suuntaStep>0){ suuntaStep--; els('progress').value=suuntaStep; applyProgress(); } });
+els('nextLine').addEventListener('click', ()=>{ const mx=+els('progress').max; if(suuntaStep<mx){ suuntaStep++; els('progress').value=suuntaStep; applyProgress(); } });
+els('progress').addEventListener('input', ()=>{ suuntaStep=+els('progress').value; applyProgress(); });
+els('resetSuunta').addEventListener('click', async ()=>{ try{ if(API) await API.viewer.setObjectState(undefined,{ color:'reset' }); }catch(e){} setSuuntaStatus('Värit nollattu.'); });
 els('pdfInput').addEventListener('change', async (e)=>{
   const file = e.target.files && e.target.files[0]; if(!file) return;
   els('pdfName').textContent = file.name;
@@ -963,6 +1063,7 @@ function showTab(name){
   els('tab-asennus').style.display = name==='asennus' ? 'block':'none';
   els('tab-rahti').style.display   = name==='rahti'   ? 'block':'none';
   els('tab-toimitus').style.display = name==='toimitus' ? 'block':'none';
+  els('tab-suunta').style.display = name==='suunta' ? 'block':'none';
 }
 
 connect();
