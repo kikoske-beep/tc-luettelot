@@ -600,7 +600,7 @@ function exportCsv(which){
   else download('rahtiluettelo.csv', toCsv(rahtiRows(), COLS_RA), 'text/csv;charset=utf-8');
 }
 let XLSX_READY=null;
-function loadXLSX(){ if(window.XLSX) return Promise.resolve(true); if(XLSX_READY) return XLSX_READY; XLSX_READY=new Promise(res=>{ const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s); }); return XLSX_READY; }
+function loadXLSX(){ if(window.XLSX) return Promise.resolve(true); if(XLSX_READY) return XLSX_READY; XLSX_READY=new Promise(res=>{ const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js'; s.onload=()=>res(true); s.onerror=()=>res(false); document.head.appendChild(s); }); return XLSX_READY; }
 async function exportXlsx(which){
   if(!ROWS.length) return;
   const ok = await loadXLSX();
@@ -654,6 +654,29 @@ function buildScheduleAOA(meta){
   if(noLoad.length) emit(noLoad, '', {});
   return H;
 }
+function styleScheduleSheet(ws, aoa){
+  const X = window.XLSX;
+  const thin = {style:'thin', color:{rgb:'FFB0B0B0'}};
+  const border = {top:thin,bottom:thin,left:thin,right:thin};
+  const set = (r,c,style,z)=>{ const a=X.utils.encode_cell({r,c}); const cell=ws[a]; if(cell){ cell.s=Object.assign({}, cell.s, style); if(z) cell.z=z; } };
+  set(0,4,{font:{bold:true,sz:14},alignment:{horizontal:'center',vertical:'center'}});
+  set(0,9,{font:{bold:true,sz:12},alignment:{horizontal:'center',vertical:'center'}});
+  set(2,4,{font:{bold:true,sz:11},alignment:{horizontal:'center',vertical:'center'}});
+  [[3,0],[3,4],[3,9],[3,11],[4,0],[4,4],[4,9],[4,11]].forEach(([r,c])=> set(r,c,{font:{bold:true}}));
+  for(let c=0;c<14;c++) set(5,c,{ font:{bold:true,color:{rgb:'FF1F3864'}}, fill:{patternType:'solid',fgColor:{rgb:'FFD9E1F2'}}, alignment:{horizontal:'center',vertical:'center',wrapText:true}, border });
+  const numCols = new Set([0,4,8,9,10]);
+  for(let r=6;r<aoa.length;r++){
+    const row = aoa[r];
+    const isSub = (row[2]===''||row[2]==null) && (typeof row[4]==='number');
+    for(let c=0;c<14;c++){
+      const st = { border };
+      if(numCols.has(c)) st.alignment = {horizontal:'right'};
+      if(isSub && c===4) st.font = {bold:true};
+      set(r,c,st, c===11?'dd.mm.yyyy':undefined);
+    }
+    if(isSub) for(let c=0;c<14;c++) set(r,c,{ border:{top:{style:'medium',color:{rgb:'FF808080'}},bottom:thin,left:thin,right:thin} });
+  }
+}
 async function exportSchedule(){
   if(!ROWS.length){ setStatus('Ei rivejä vietäväksi.','warn'); return; }
   const ok = await loadXLSX();
@@ -669,6 +692,7 @@ async function exportSchedule(){
   const ws = window.XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
   ws['!cols'] = [{wch:4},{wch:16},{wch:22},{wch:10},{wch:14},{wch:10},{wch:10},{wch:10},{wch:11},{wch:10},{wch:10},{wch:13},{wch:11},{wch:12}];
   ws['!merges'] = [{s:{r:0,c:4},e:{r:1,c:8}},{s:{r:0,c:9},e:{r:2,c:13}},{s:{r:2,c:4},e:{r:2,c:8}},{s:{r:0,c:0},e:{r:2,c:3}}];
+  styleScheduleSheet(ws, aoa);
   const wb = window.XLSX.utils.book_new();
   window.XLSX.utils.book_append_sheet(wb, ws, 'Aikataulu');
   window.XLSX.writeFile(wb, 'toimitus_asennusaikataulu.xlsx');
