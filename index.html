@@ -117,6 +117,7 @@
       <button class="btn sec" id="csvAs">Vie CSV</button>
       <button class="btn sec" id="xlsAs">Vie Excel</button>
       <button class="btn sec" id="printAs">Tulosta / PDF</button>
+      <button class="btn" id="scheduleBtnAs">Vie aikataulu (Excel-pohja)</button>
     </div>
     <p class="hint no-print">Klikkaa riviä tai kokoonpanoa mallissa — valinta näkyy molemmissa. Mallissa voit valita useita pitämällä Ctrl- tai Shift-näppäintä pohjassa. Järjestä rivit ▲▼-napeilla tai raahaamalla ⠿, "3D" zoomaa kokoonpanoon, "✕" poistaa rivin.</p>
     <div class="tablewrap">
@@ -714,6 +715,7 @@ els('xlsRa').addEventListener('click', ()=>exportXlsx('ra'));
 els('printAs').addEventListener('click', ()=>{ showTab('asennus'); setTimeout(()=>window.print(),120); });
 els('printRa').addEventListener('click', ()=>{ showTab('rahti'); setTimeout(()=>window.print(),120); });
 els('scheduleBtn').addEventListener('click', exportSchedule);
+els('scheduleBtnAs').addEventListener('click', exportSchedule);
 document.querySelectorAll('.tab').forEach(t=> t.addEventListener('click', ()=> showTab(t.dataset.tab)));
 function showTab(name){
   document.querySelectorAll('.tab').forEach(t=> t.classList.toggle('active', t.dataset.tab===name));
