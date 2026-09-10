@@ -18,6 +18,8 @@
   .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; }
   label.fld{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:#556; }
   select,input[type=number]{ padding:7px 8px; border:1px solid #c7ccd4; border-radius:6px; font-size:13px; background:#fff; width:100%; }
+  input[type=text]{ padding:6px 8px; border:1px solid #c7ccd4; border-radius:6px; font-size:13px; background:#fff; }
+  input[type=date],input[type=time]{ padding:4px 6px; border:1px solid #c7ccd4; border-radius:6px; font-size:12px; background:#fff; }
   .btn{ background:var(--blue); color:#fff; border:none; border-radius:6px; padding:9px 16px; font-size:13px; cursor:pointer; font-weight:600; }
   .btn:hover{ background:var(--blue-d); }
   .btn.sec{ background:#eef1f5; color:#2a2f36; border:1px solid #d3d8df; font-weight:500; }
@@ -151,6 +153,12 @@
       <button class="btn sec" id="xlsRa">Vie Excel</button>
       <button class="btn sec" id="printRa">Tulosta / PDF</button>
     </div>
+    <div class="row-actions" style="margin-top:8px">
+      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Yhteyshenkilö <input type="text" id="metaContact" placeholder="esim. Kimmo Koskela" style="width:160px"></label>
+      <label class="fld" style="flex-direction:row;align-items:center;gap:6px">Puhelin <input type="text" id="metaPhone" placeholder="+358…" style="width:120px"></label>
+      <span style="flex:1"></span>
+      <button class="btn" id="scheduleBtn">Vie aikataulu (Excel-pohja)</button>
+    </div>
     <p class="hint no-print">Automaattijako täyttää kuormat asennusjärjestyksessä painorajaan asti. Kuorman numeron voi myös kirjoittaa käsin.</p>
     <div class="tablewrap">
       <table id="tblRa">
@@ -170,8 +178,8 @@
     <h2 style="margin:16px 0 8px;color:var(--blue)">Kuormien yhteenveto</h2>
     <div class="tablewrap" style="max-height:28vh">
       <table id="tblSum">
-        <thead><tr><th class="num">Kuorma</th><th class="num">Kokoonpanoja (kpl)</th><th class="num">Paino (kg)</th></tr></thead>
-        <tbody id="bodySum"><tr><td colspan="3" class="empty">—</td></tr></tbody>
+        <thead><tr><th class="num">Kuorma</th><th class="num">Kpl</th><th class="num">Paino (kg)</th><th>Toimituspäivä</th><th>Kellonaika</th></tr></thead>
+        <tbody id="bodySum"><tr><td colspan="5" class="empty">—</td></tr></tbody>
         <tfoot id="footSum"></tfoot>
       </table>
     </div>
@@ -193,7 +201,7 @@ async function connect(){
     API = await TrimbleConnectWorkspace.connect(window.parent, onEvent, 30000);
     startSelectionWatch();                                                        // aloita heti, ennen muita awaiteja
     Promise.resolve(API.viewer.setSettings({ assemblySelection:true })).catch(()=>{});  // klikkaus valitsee koko kokoonpanon (ei jää odottamaan)
-    try{ const p = await API.project.getCurrentProject(); if(p&&p.name) els('projname').textContent = '— '+p.name; }catch(e){}
+    try{ const p = await API.project.getCurrentProject(); if(p&&p.name){ projectName=p.name; els('projname').textContent = '— '+p.name; } }catch(e){}
     setStatus('Yhteys muodostettu. Paina "Aloita poiminta" ja klikkaa kokoonpanoja mallista.','ok');
   }catch(e){
     setStatus('Yhteyttä ei saatu: '+e+'. Avaa työkalu Trimble Connectin 3D-katselussa.','warn');
@@ -234,6 +242,8 @@ const addedKeys = new Set();  // estää duplikaatit
 let selectorsInit = false;
 let selectedKeys = new Set(); // korostettujen rivien tunnisteet (modelId|id)
 let anchorKey = null;         // Shift-valinnan ankkuri
+let LOADINFO = {};            // kuorma -> { date:'YYYY-MM-DD', time:'HH:MM' }
+let projectName = '';         // Trimble-projektin nimi (aikataulun otsikkoon)
 
 /* ===================== Poiminta ===================== */
 async function toggleCapture(){
@@ -454,10 +464,17 @@ function renderSummary(){
   ROWS.forEach(r=>{ if(r.load==='' || r.load==null) return; (map[r.load] ??= {pcs:0,kg:0}); map[r.load].pcs++; map[r.load].kg += (r.weight||0); });
   const keys = Object.keys(map).map(Number).sort((a,b)=>a-b);
   const sb = els('bodySum');
-  if(!keys.length){ sb.innerHTML='<tr><td colspan="3" class="empty">Ei kuormia. Käytä "Jaottele kuormiin" tai syötä kuorman numero.</td></tr>'; els('footSum').innerHTML=''; return; }
-  sb.innerHTML = keys.map(k=>`<tr><td class="num">${k}</td><td class="num">${map[k].pcs}</td><td class="num">${fmt(+map[k].kg.toFixed(1))}</td></tr>`).join('');
+  if(!keys.length){ sb.innerHTML='<tr><td colspan="5" class="empty">Ei kuormia. Käytä "Jaottele kuormiin" tai syötä kuorman numero.</td></tr>'; els('footSum').innerHTML=''; return; }
+  sb.innerHTML = keys.map(k=>{
+    const info = LOADINFO[k] || {};
+    return `<tr><td class="num">${k}</td><td class="num">${map[k].pcs}</td><td class="num">${fmt(+map[k].kg.toFixed(1))}</td>`+
+      `<td><input type="date" class="li-date" data-load="${k}" value="${info.date||''}"></td>`+
+      `<td><input type="time" class="li-time" data-load="${k}" value="${info.time||''}"></td></tr>`;
+  }).join('');
   const tPcs = keys.reduce((s,k)=>s+map[k].pcs,0), tKg = keys.reduce((s,k)=>s+map[k].kg,0);
-  els('footSum').innerHTML = `<tr><td class="num">${keys.length} kuormaa</td><td class="num">${tPcs}</td><td class="num">${fmt(+tKg.toFixed(1))}</td></tr>`;
+  els('footSum').innerHTML = `<tr><td class="num">${keys.length} kuormaa</td><td class="num">${tPcs}</td><td class="num">${fmt(+tKg.toFixed(1))}</td><td></td><td></td></tr>`;
+  sb.querySelectorAll('input.li-date').forEach(inp=> inp.addEventListener('change', ()=>{ const k=inp.dataset.load; (LOADINFO[k] ??= {}); LOADINFO[k].date=inp.value; }));
+  sb.querySelectorAll('input.li-time').forEach(inp=> inp.addEventListener('change', ()=>{ const k=inp.dataset.load; (LOADINFO[k] ??= {}); LOADINFO[k].time=inp.value; }));
 }
 
 /* ===================== Vuorovaikutus ===================== */
@@ -598,6 +615,66 @@ async function exportXlsx(which){
 }
 function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
+/* ===== Aikataulu-Excel: "1.1 hall" -pohjan mukainen (otsikkolohko + sarakkeet + kuormaryhmittely) ===== */
+function buildScheduleAOA(meta){
+  const blank = ()=>['','','','','','','','','','','','','',''];
+  const H = [];
+  let r0=blank(); r0[4]='ASSEMBLY LIST, DETAILED'; r0[9]='Work project'; H.push(r0);
+  H.push(blank());
+  let r2=blank(); r2[4]=meta.subtitle||''; H.push(r2);
+  let r3=blank(); r3[0]='Project name:'; r3[2]=meta.project||''; r3[4]='Contact person'; r3[7]=meta.contact||''; r3[9]='Compiler:'; r3[11]='Customer Project number:'; H.push(r3);
+  let r4=blank(); r4[0]='Project address:'; r4[4]='Phone'; r4[7]=meta.phone||''; r4[9]='Version:'; r4[10]=1; r4[11]='Version date:'; r4[13]=meta.date||''; H.push(r4);
+  H.push(['#','Part ID (model)','Part ID (layout in.pdf )','Type','Weight, t. (reference data*)','Height [mm]','Width [mm]','Material','Lenght [mm]','Quantity / PCs','Total quantity','Delivery date','Delivery time','Note']);
+  const parseDate = s=>{ const m=String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(+m[1], +m[2]-1, +m[3]) : ''; };
+  const byLoad = new Map(); const noLoad = [];
+  ROWS.forEach(rw=>{ if(rw.load===''||rw.load==null) noLoad.push(rw); else { const k=+rw.load; if(!byLoad.has(k)) byLoad.set(k,[]); byLoad.get(k).push(rw); } });
+  const loadKeys = [...byLoad.keys()].sort((a,b)=>a-b);
+  let seq = 0;
+  const emit = (list, label, info)=>{
+    let sum = 0;
+    for(const rw of list){
+      seq++;
+      const row = blank();
+      row[0]=seq;
+      row[2]=rw.mark;
+      row[3]=rw.type||'';
+      row[4]=(typeof rw.weight==='number'&&isFinite(rw.weight))?rw.weight:'';
+      row[7]=rw.material||'';
+      row[8]=(rw.length===''||rw.length==null)?'':rw.length;
+      row[9]=1;
+      row[11]=(info&&info.date)?parseDate(info.date):'';
+      row[12]=(info&&info.time)?info.time:'';
+      row[13]=label;
+      H.push(row);
+      if(typeof rw.weight==='number'&&isFinite(rw.weight)) sum+=rw.weight;
+    }
+    const st=blank(); st[4]=Math.round(sum*10)/10; H.push(st);
+  };
+  loadKeys.forEach(k=> emit(byLoad.get(k), 'Kuorma '+k, LOADINFO[k]||{}));
+  if(noLoad.length) emit(noLoad, '', {});
+  return H;
+}
+async function exportSchedule(){
+  if(!ROWS.length){ setStatus('Ei rivejä vietäväksi.','warn'); return; }
+  const ok = await loadXLSX();
+  if(!ok || !window.XLSX){ setStatus('Excel-kirjaston lataus epäonnistui.','warn'); return; }
+  const meta = {
+    project: projectName || '',
+    contact: (els('metaContact') && els('metaContact').value) || '',
+    phone: (els('metaPhone') && els('metaPhone').value) || '',
+    subtitle: projectName ? (projectName + ' – teräsrunko') : 'Building main steel',
+    date: new Date()
+  };
+  const aoa = buildScheduleAOA(meta);
+  const ws = window.XLSX.utils.aoa_to_sheet(aoa, { cellDates:true });
+  ws['!cols'] = [{wch:4},{wch:16},{wch:22},{wch:10},{wch:14},{wch:10},{wch:10},{wch:10},{wch:11},{wch:10},{wch:10},{wch:13},{wch:11},{wch:12}];
+  ws['!merges'] = [{s:{r:0,c:4},e:{r:1,c:8}},{s:{r:0,c:9},e:{r:2,c:13}},{s:{r:2,c:4},e:{r:2,c:8}},{s:{r:0,c:0},e:{r:2,c:3}}];
+  const wb = window.XLSX.utils.book_new();
+  window.XLSX.utils.book_append_sheet(wb, ws, 'Aikataulu');
+  window.XLSX.writeFile(wb, 'toimitus_asennusaikataulu.xlsx');
+  setStatus('Aikataulu viety Exceliin.','ok');
+}
+
 /* ===================== Kytkennät ===================== */
 els('capBtn').addEventListener('click', toggleCapture);
 els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
@@ -612,6 +689,7 @@ els('xlsAs').addEventListener('click', ()=>exportXlsx('as'));
 els('xlsRa').addEventListener('click', ()=>exportXlsx('ra'));
 els('printAs').addEventListener('click', ()=>{ showTab('asennus'); setTimeout(()=>window.print(),120); });
 els('printRa').addEventListener('click', ()=>{ showTab('rahti'); setTimeout(()=>window.print(),120); });
+els('scheduleBtn').addEventListener('click', exportSchedule);
 document.querySelectorAll('.tab').forEach(t=> t.addEventListener('click', ()=> showTab(t.dataset.tab)));
 function showTab(name){
   document.querySelectorAll('.tab').forEach(t=> t.classList.toggle('active', t.dataset.tab===name));
