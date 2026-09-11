@@ -113,7 +113,6 @@
     <div class="row-actions">
       <span class="pill" id="asCount">0 riviä</span>
       <button class="btn sec" id="clearSel">Tyhjennä korostus</button>
-      <button class="btn sec" id="dimsBtn">Laske mitat (lastaus)</button>
       <span style="flex:1"></span>
       <button class="btn sec" id="csvAs">Vie CSV</button>
       <button class="btn sec" id="xlsAs">Vie Excel</button>
@@ -336,6 +335,7 @@ async function onPick(sel){
   if(!fresh.length) return;
   setStatus('Haetaan valitun kokoonpanon tiedot…');
   let added = 0;
+  const newObjs = [];
   for(const p of fresh){
     const asm = await resolveAssembly(p.modelId, p.id);
     if(!asm) continue;
@@ -347,9 +347,12 @@ async function onPick(sel){
     o.__load = '';
     o.__keys = [p.key, akey];
     RAW.push(o);
+    newObjs.push(o);
     added++;
   }
-  if(added){ mergeSelectors(); deriveRows(); render(); setStatus(`Poimittu ${RAW.length} kokoonpanoa (asennusjärjestys).`,'ok'); }
+  if(added){ mergeSelectors(); deriveRows(); render(); setStatus(`Poimittu ${RAW.length} kokoonpanoa (asennusjärjestys).`,'ok');
+    fetchDimsFor(newObjs).then(()=>{ assignDims(); deriveRows(); render(); }).catch(()=>{});   // mitat taustalla lastausta varten
+  }
 }
 
 /* ===================== Kenttävalinnat ===================== */
@@ -574,32 +577,27 @@ function autoPack(maxWeight){
   deriveRows(); render();
 }
 
-async function computeDims(){
-  if(!API || !RAW.length){ setStatus('Ei kokoonpanoja mitattavaksi.','warn'); return; }
-  const btn = els('dimsBtn'); if(btn) btn.disabled = true;
-  try{
-    setStatus('Lasketaan mittoja geometriasta…');
-    const byModel = {};
-    RAW.forEach(o=>{ (byModel[o.__modelId] ??= []).push(o.id); });
-    const boxOf = new Map();  // modelId|id -> {dx,dy,dz}
-    for(const [mid, ids] of Object.entries(byModel)){
-      const B = 500;
-      for(let i=0;i<ids.length;i+=B){
-        const chunk = ids.slice(i,i+B);
-        let bbs = []; try{ bbs = await API.viewer.getObjectBoundingBoxes(mid, chunk); }catch(e){}
-        (bbs||[]).forEach(bb=>{ const b = bb && (bb.boundingBox||bb.box); if(!b||!b.min||!b.max) return; boxOf.set(mid+'|'+bb.id, { dx:Math.abs(b.max.x-b.min.x), dy:Math.abs(b.max.y-b.min.y), dz:Math.abs(b.max.z-b.min.z) }); });
-        setStatus(`Lasketaan mittoja… ${Math.min(i+B,ids.length)}/${ids.length}`);
-      }
+async function fetchDimsFor(objs){
+  if(!API || !objs || !objs.length) return;
+  const byModel = {};
+  objs.forEach(o=>{ (byModel[o.__modelId] ??= []).push(o); });
+  for(const [mid, list] of Object.entries(byModel)){
+    const ids = list.map(o=>o.id);
+    const map = new Map();
+    const B = 500;
+    for(let i=0;i<ids.length;i+=B){
+      const chunk = ids.slice(i,i+B);
+      let bbs = []; try{ bbs = await API.viewer.getObjectBoundingBoxes(mid, chunk); }catch(e){}
+      (bbs||[]).forEach(bb=>{ const b = bb && (bb.boundingBox||bb.box); if(b&&b.min&&b.max) map.set(bb.id, b); });
     }
-    if(!boxOf.size){ setStatus('Mittoja ei saatu (geometria ei käytettävissä).','warn'); if(btn) btn.disabled=false; return; }
-    let gmax = 0; boxOf.forEach(d=>{ gmax=Math.max(gmax, d.dx, d.dy, d.dz); });
-    const scale = (gmax>0 && gmax<100) ? 1000 : 1;   // metrit -> millimetrit
-    let n = 0;
-    RAW.forEach(o=>{ const d = boxOf.get(o.__modelId+'|'+o.id); if(!d) return; const dims=[d.dx,d.dy,d.dz].map(v=>Math.round(v*scale)).sort((a,b)=>b-a); o.__len=dims[0]; o.__wid=dims[1]; o.__hei=dims[2]; n++; });
-    deriveRows(); render();
-    setStatus(`Mitat laskettu ${n} kokoonpanolle (pituus = pisin ulkomitta, lastausta varten). Näkyvät myös aikataulun Excel-viennissä.`,'ok');
-  }catch(e){ setStatus('Mittojen laskenta epäonnistui: '+e,'warn'); }
-  finally{ if(btn) btn.disabled = false; }
+    list.forEach(o=>{ const b = map.get(o.id); if(b){ o.__rawdx=Math.abs(b.max.x-b.min.x); o.__rawdy=Math.abs(b.max.y-b.min.y); o.__rawdz=Math.abs(b.max.z-b.min.z); } });
+  }
+}
+function assignDims(){
+  let gmax = 0;
+  RAW.forEach(o=>{ if(o.__rawdx!=null){ gmax=Math.max(gmax, o.__rawdx, o.__rawdy, o.__rawdz); } });
+  const scale = (gmax>0 && gmax<100) ? 1000 : 1;   // metrit -> millimetrit (automaattinen tunnistus)
+  RAW.forEach(o=>{ if(o.__rawdx==null) return; const dims=[o.__rawdx,o.__rawdy,o.__rawdz].map(v=>Math.round(v*scale)).sort((a,b)=>b-a); o.__len=dims[0]; o.__wid=dims[1]; o.__hei=dims[2]; });
 }
 
 /* ===================== Vienti ===================== */
@@ -739,7 +737,6 @@ els('capBtn').addEventListener('click', toggleCapture);
 els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
 els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); selectedKeys.clear(); anchorKey=null; deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
 els('clearSel').addEventListener('click', clearSelection);
-els('dimsBtn').addEventListener('click', computeDims);
 ['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); }));
 els('packBtn').addEventListener('click', ()=>{ autoPack(num(els('maxLoad').value)||24000); });
 els('clearLoads').addEventListener('click', ()=>{ RAW.forEach(o=>o.__load=''); deriveRows(); render(); });
