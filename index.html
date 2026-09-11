@@ -89,12 +89,6 @@
       <label class="fld">Paino
         <select id="fWeight"></select>
       </label>
-      <label class="fld">Profiili
-        <select id="fProfile"></select>
-      </label>
-      <label class="fld">Materiaali
-        <select id="fMaterial"></select>
-      </label>
       <label class="fld">Pituus
         <select id="fLength"></select>
       </label>
@@ -127,14 +121,13 @@
             <th class="no-print"></th>
             <th class="num">Nro</th>
             <th>Tunnus</th>
-            <th>Profiili</th>
-            <th>Materiaali</th>
             <th class="num">Pituus (mm)</th>
+            <th class="num">Leveys (mm)</th>
             <th class="num">Paino (kg)</th>
             <th class="no-print actcol"></th>
           </tr>
         </thead>
-        <tbody id="bodyAs"><tr><td colspan="8" class="empty">Ei vielä poimintoja.</td></tr></tbody>
+        <tbody id="bodyAs"><tr><td colspan="7" class="empty">Ei vielä poimintoja.</td></tr></tbody>
         <tfoot id="footAs"></tfoot>
       </table>
     </div>
@@ -168,12 +161,11 @@
             <th class="num">Kuorma</th>
             <th class="num">Nro</th>
             <th>Tunnus</th>
-            <th>Profiili</th>
             <th class="num">Paino (kg)</th>
             <th class="no-print col3d"></th>
           </tr>
         </thead>
-        <tbody id="bodyRa"><tr><td colspan="6" class="empty">Ei vielä poimintoja.</td></tr></tbody>
+        <tbody id="bodyRa"><tr><td colspan="5" class="empty">Ei vielä poimintoja.</td></tr></tbody>
       </table>
     </div>
     <h2 style="margin:16px 0 8px;color:var(--blue)">Kuormien yhteenveto</h2>
@@ -377,15 +369,13 @@ function mergeSelectors(source){
   };
   fill('fMark', DEFAULTS.mark);
   fill('fWeight', DEFAULTS.weight);
-  fill('fProfile', DEFAULTS.profile);
-  fill('fMaterial', DEFAULTS.material);
   fill('fLength', DEFAULTS.length);
   selectorsInit = true;
   els('mapGrid').style.display = 'grid';
 }
 function currentMap(){
   const one = v => v ? [v] : ['\u0000none'];
-  return { mark:one(els('fMark').value), weight:one(els('fWeight').value), profile:one(els('fProfile').value), material:one(els('fMaterial').value), length:one(els('fLength').value) };
+  return { mark:one(els('fMark').value), weight:one(els('fWeight').value), length:one(els('fLength').value) };
 }
 
 /* ===================== Rivien johtaminen ===================== */
@@ -398,8 +388,6 @@ function deriveRows(){
     return {
       seq: i+1,
       mark: (markRaw==null||markRaw==='') ? '(ei tunnusta)' : String(markRaw),
-      profile: findProp(flat, map.profile) ?? '',
-      material: findProp(flat, map.material) ?? '',
       length: (gLen!=null) ? gLen : (findProp(flat, map.length) ?? ''),
       width: (o.__wid!=null) ? o.__wid : '',
       height: (o.__hei!=null) ? o.__hei : '',
@@ -415,7 +403,7 @@ function render(){ renderAsennus(); renderRahti(); attachRowClicks(els('bodyAs')
 
 function renderAsennus(){
   const tb = els('bodyAs');
-  if(!ROWS.length){ tb.innerHTML='<tr><td colspan="8" class="empty">Ei vielä poimintoja.</td></tr>'; els('footAs').innerHTML=''; els('asCount').textContent='0 riviä'; return; }
+  if(!ROWS.length){ tb.innerHTML='<tr><td colspan="7" class="empty">Ei vielä poimintoja.</td></tr>'; els('footAs').innerHTML=''; els('asCount').textContent='0 riviä'; return; }
   tb.innerHTML='';
   ROWS.forEach((r, idx)=>{
     const tr = document.createElement('tr');
@@ -426,9 +414,8 @@ function renderAsennus(){
       `<td class="drag no-print" draggable="true" title="Raahaa järjestykseen">⠿</td>`+
       `<td class="num seqno">${r.seq}</td>`+
       `<td>${escapeHtml(r.mark)}</td>`+
-      `<td>${escapeHtml(r.profile)}</td>`+
-      `<td>${escapeHtml(r.material)}</td>`+
       `<td class="num">${fmt(num(r.length))}</td>`+
+      `<td class="num">${fmt(num(r.width))}</td>`+
       `<td class="num">${fmt(r.weight)}</td>`+
       `<td class="no-print actcol"><div class="acts">`+
         `<button class="mini" data-up="${idx}" title="Ylös">▲</button>`+
@@ -439,14 +426,14 @@ function renderAsennus(){
     tb.appendChild(tr);
   });
   const totKg = ROWS.reduce((s,r)=>s+(r.weight||0),0);
-  els('footAs').innerHTML = `<tr><td class="no-print"></td><td></td><td>Yhteensä ${ROWS.length} kpl</td><td></td><td></td><td></td><td class="num">${fmt(+totKg.toFixed(1))}</td><td class="no-print"></td></tr>`;
+  els('footAs').innerHTML = `<tr><td class="no-print"></td><td></td><td>Yhteensä ${ROWS.length} kpl</td><td></td><td></td><td class="num">${fmt(+totKg.toFixed(1))}</td><td class="no-print"></td></tr>`;
   els('asCount').textContent = `${ROWS.length} riviä`;
   wireAsennus();
 }
 
 function renderRahti(){
   const tb = els('bodyRa');
-  if(!ROWS.length){ tb.innerHTML='<tr><td colspan="6" class="empty">Ei vielä poimintoja.</td></tr>'; els('bodySum').innerHTML='<tr><td colspan="3" class="empty">—</td></tr>'; els('footSum').innerHTML=''; return; }
+  if(!ROWS.length){ tb.innerHTML='<tr><td colspan="5" class="empty">Ei vielä poimintoja.</td></tr>'; els('bodySum').innerHTML='<tr><td colspan="3" class="empty">—</td></tr>'; els('footSum').innerHTML=''; return; }
   tb.innerHTML='';
   ROWS.forEach((r, idx)=>{
     const tr = document.createElement('tr');
@@ -457,7 +444,6 @@ function renderRahti(){
       `<td class="num"><input class="load-in" type="number" min="1" value="${r.load||''}" data-load="${idx}"></td>`+
       `<td class="num seqno">${r.seq}</td>`+
       `<td>${escapeHtml(r.mark)}</td>`+
-      `<td>${escapeHtml(r.profile)}</td>`+
       `<td class="num">${fmt(r.weight)}</td>`+
       `<td class="no-print col3d"><button class="mini" data-3d="${idx}">3D</button></td>`;
     tb.appendChild(tr);
@@ -608,12 +594,12 @@ function download(name, text, mime){
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 500);
 }
 const COLS_AS = [
-  {key:'seq',label:'Nro'},{key:'mark',label:'Tunnus'},{key:'profile',label:'Profiili'},
-  {key:'material',label:'Materiaali'},{key:'length',label:'Pituus (mm)'},{key:'weight',label:'Paino (kg)'}
+  {key:'seq',label:'Nro'},{key:'mark',label:'Tunnus'},{key:'length',label:'Pituus (mm)'},
+  {key:'width',label:'Leveys (mm)'},{key:'weight',label:'Paino (kg)'}
 ];
 const COLS_RA = [
   {key:'load',label:'Kuorma'},{key:'seq',label:'Nro'},{key:'mark',label:'Tunnus'},
-  {key:'profile',label:'Profiili'},{key:'weight',label:'Paino (kg)'}
+  {key:'weight',label:'Paino (kg)'}
 ];
 function toCsv(rows, columns, sep=';'){
   const fnum = v => (typeof v==='number') ? String(v).replace('.', ',') : v;
@@ -737,7 +723,7 @@ els('capBtn').addEventListener('click', toggleCapture);
 els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
 els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); selectedKeys.clear(); anchorKey=null; deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
 els('clearSel').addEventListener('click', clearSelection);
-['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); }));
+['fMark','fWeight','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); }));
 els('packBtn').addEventListener('click', ()=>{ autoPack(num(els('maxLoad').value)||24000); });
 els('clearLoads').addEventListener('click', ()=>{ RAW.forEach(o=>o.__load=''); deriveRows(); render(); });
 els('csvAs').addEventListener('click', ()=>exportCsv('as'));
