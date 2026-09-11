@@ -113,6 +113,7 @@
     <div class="row-actions">
       <span class="pill" id="asCount">0 riviä</span>
       <button class="btn sec" id="clearSel">Tyhjennä korostus</button>
+      <button class="btn sec" id="dimsBtn">Laske mitat (lastaus)</button>
       <span style="flex:1"></span>
       <button class="btn sec" id="csvAs">Vie CSV</button>
       <button class="btn sec" id="xlsAs">Vie Excel</button>
@@ -390,12 +391,15 @@ function deriveRows(){
   ROWS = RAW.map((o,i)=>{
     const flat = flattenProps(o);
     const markRaw = findProp(flat, map.mark);
+    const gLen = o.__len;   // geometriasta laskettu pituus (lastausta varten), jos laskettu
     return {
       seq: i+1,
       mark: (markRaw==null||markRaw==='') ? '(ei tunnusta)' : String(markRaw),
       profile: findProp(flat, map.profile) ?? '',
       material: findProp(flat, map.material) ?? '',
-      length: findProp(flat, map.length) ?? '',
+      length: (gLen!=null) ? gLen : (findProp(flat, map.length) ?? ''),
+      width: (o.__wid!=null) ? o.__wid : '',
+      height: (o.__hei!=null) ? o.__hei : '',
       weight: +(num(findProp(flat, map.weight)) || 0).toFixed(1),
       load: o.__load ?? '',
       ref: { modelId:o.__modelId, id:o.id }
@@ -570,6 +574,34 @@ function autoPack(maxWeight){
   deriveRows(); render();
 }
 
+async function computeDims(){
+  if(!API || !RAW.length){ setStatus('Ei kokoonpanoja mitattavaksi.','warn'); return; }
+  const btn = els('dimsBtn'); if(btn) btn.disabled = true;
+  try{
+    setStatus('Lasketaan mittoja geometriasta…');
+    const byModel = {};
+    RAW.forEach(o=>{ (byModel[o.__modelId] ??= []).push(o.id); });
+    const boxOf = new Map();  // modelId|id -> {dx,dy,dz}
+    for(const [mid, ids] of Object.entries(byModel)){
+      const B = 500;
+      for(let i=0;i<ids.length;i+=B){
+        const chunk = ids.slice(i,i+B);
+        let bbs = []; try{ bbs = await API.viewer.getObjectBoundingBoxes(mid, chunk); }catch(e){}
+        (bbs||[]).forEach(bb=>{ const b = bb && (bb.boundingBox||bb.box); if(!b||!b.min||!b.max) return; boxOf.set(mid+'|'+bb.id, { dx:Math.abs(b.max.x-b.min.x), dy:Math.abs(b.max.y-b.min.y), dz:Math.abs(b.max.z-b.min.z) }); });
+        setStatus(`Lasketaan mittoja… ${Math.min(i+B,ids.length)}/${ids.length}`);
+      }
+    }
+    if(!boxOf.size){ setStatus('Mittoja ei saatu (geometria ei käytettävissä).','warn'); if(btn) btn.disabled=false; return; }
+    let gmax = 0; boxOf.forEach(d=>{ gmax=Math.max(gmax, d.dx, d.dy, d.dz); });
+    const scale = (gmax>0 && gmax<100) ? 1000 : 1;   // metrit -> millimetrit
+    let n = 0;
+    RAW.forEach(o=>{ const d = boxOf.get(o.__modelId+'|'+o.id); if(!d) return; const dims=[d.dx,d.dy,d.dz].map(v=>Math.round(v*scale)).sort((a,b)=>b-a); o.__len=dims[0]; o.__wid=dims[1]; o.__hei=dims[2]; n++; });
+    deriveRows(); render();
+    setStatus(`Mitat laskettu ${n} kokoonpanolle (pituus = pisin ulkomitta, lastausta varten). Näkyvät myös aikataulun Excel-viennissä.`,'ok');
+  }catch(e){ setStatus('Mittojen laskenta epäonnistui: '+e,'warn'); }
+  finally{ if(btn) btn.disabled = false; }
+}
+
 /* ===================== Vienti ===================== */
 function download(name, text, mime){
   const blob = new Blob([text], { type: mime||'text/plain;charset=utf-8' });
@@ -640,6 +672,8 @@ function buildScheduleAOA(meta){
       row[2]=rw.mark;
       row[3]=rw.type||'';
       row[4]=(typeof rw.weight==='number'&&isFinite(rw.weight))?rw.weight:'';
+      row[5]=(rw.height===''||rw.height==null)?'':rw.height;   // Height [mm]
+      row[6]=(rw.width===''||rw.width==null)?'':rw.width;      // Width [mm]
       row[7]=rw.material||'';
       row[8]=(rw.length===''||rw.length==null)?'':rw.length;
       row[9]=1;
@@ -705,6 +739,7 @@ els('capBtn').addEventListener('click', toggleCapture);
 els('undoBtn').addEventListener('click', ()=>{ if(RAW.length){ removeRow(RAW.length-1); } });
 els('clearBtn').addEventListener('click', ()=>{ RAW=[]; addedKeys.clear(); selectedKeys.clear(); anchorKey=null; deriveRows(); render(); setStatus('Lista tyhjennetty.'); });
 els('clearSel').addEventListener('click', clearSelection);
+els('dimsBtn').addEventListener('click', computeDims);
 ['fMark','fWeight','fProfile','fMaterial','fLength'].forEach(id=> els(id).addEventListener('change', ()=>{ deriveRows(); render(); }));
 els('packBtn').addEventListener('click', ()=>{ autoPack(num(els('maxLoad').value)||24000); });
 els('clearLoads').addEventListener('click', ()=>{ RAW.forEach(o=>o.__load=''); deriveRows(); render(); });
