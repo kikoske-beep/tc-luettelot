@@ -583,7 +583,18 @@ function assignDims(){
   let gmax = 0;
   RAW.forEach(o=>{ if(o.__rawdx!=null){ gmax=Math.max(gmax, o.__rawdx, o.__rawdy, o.__rawdz); } });
   const scale = (gmax>0 && gmax<100) ? 1000 : 1;   // metrit -> millimetrit (automaattinen tunnistus)
-  RAW.forEach(o=>{ if(o.__rawdx==null) return; const dims=[o.__rawdx,o.__rawdy,o.__rawdz].map(v=>Math.round(v*scale)).sort((a,b)=>b-a); o.__len=dims[0]; o.__wid=dims[1]; o.__hei=dims[2]; });
+  RAW.forEach(o=>{
+    if(o.__rawdx==null) return;
+    const [a,b,c] = [o.__rawdx, o.__rawdy, o.__rawdz].map(v=>v*scale).sort((x,y)=>y-x);
+    // Vino lineaarinen kappale: kaksi isoa mittaa (b iso suhteessa a) JA b paljon paksuutta c suurempi
+    // -> b on pituuden projektio, ei poikkileikkaus. Silloin todellinen pituus = avaruuslävistäjä, leveys = ohuin mitta.
+    const diagonal = a>0 && (b/a)>0.25 && c>0 && (b/c)>3;
+    const len = diagonal ? Math.sqrt(a*a + b*b + c*c) : a;
+    const wid = diagonal ? c : b;
+    o.__len = Math.round(len);
+    o.__wid = Math.round(wid);
+    o.__hei = Math.round(c);
+  });
 }
 
 /* ===================== Vienti ===================== */
