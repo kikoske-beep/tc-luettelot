@@ -242,8 +242,8 @@
       </label>
       <label>Muut mallin osat
         <select id="simOthers">
-          <option value="ghost" selected>Läpikuultava</option>
-          <option value="hide">Piilossa</option>
+          <option value="hide" selected>Piilossa – vain asennetut näkyvät</option>
+          <option value="ghost">Läpikuultava</option>
           <option value="normal">Normaali</option>
         </select>
       </label>
@@ -883,12 +883,40 @@ async function simState(rows, state){
   if(!API || !rows.length) return;
   try{ await API.viewer.setObjectState(simSelector(rows), state); }catch(e){ console.warn('setObjectState', e); }
 }
+// Collect runtime ids of every object in the loaded models (cached per sim session).
+// Hiding with an explicit id list keeps per-object visibility overridable;
+// hiding with an empty selector hides the whole model and nothing can be shown again.
+async function simAllObjects(){
+  if(SIM.all) return SIM.all;
+  const list = [];
+  try{
+    const models = await API.viewer.getObjects();
+    (models||[]).forEach(m => {
+      const ids = (m.objects||[]).map(o => (typeof o==='object' ? (o.id ?? o.runtimeId) : o)).filter(x => x!=null);
+      if(m.modelId && ids.length) list.push({ modelId:m.modelId, ids });
+    });
+  }catch(e){ console.warn('getObjects', e); }
+  SIM.all = list;
+  return list;
+}
 async function simBase(){
   if(!API) return;
   const mode = els('simOthers').value;
-  const st = mode==='hide' ? { visible:false }
-           : mode==='ghost' ? { visible:true, color:C_GHOST }
-           : { visible:'reset', color:'reset' };
+  if(mode === 'hide'){
+    // first make everything "normal" again, then hide every object by explicit id
+    try{ await API.viewer.setObjectState(undefined, { visible:'reset', color:'reset' }); }catch(e){}
+    const all = await simAllObjects();
+    if(!all.length){ try{ await API.viewer.setObjectState(undefined, { visible:false }); }catch(e){} return; }
+    const B = 5000;
+    for(const m of all){
+      for(let i=0; i<m.ids.length; i+=B){
+        try{ await API.viewer.setObjectState({ modelObjectIds:[{ modelId:m.modelId, objectRuntimeIds:m.ids.slice(i,i+B) }] }, { visible:false }); }
+        catch(e){ console.warn('setObjectState(hide)', e); }
+      }
+    }
+    return;
+  }
+  const st = mode==='ghost' ? { visible:true, color:C_GHOST } : { visible:'reset', color:'reset' };
   try{ await API.viewer.setObjectState(undefined, st); }catch(e){ console.warn('setObjectState(all)', e); }
 }
 async function simApplyFull(k){
@@ -988,7 +1016,7 @@ function simPause(){
 async function simEnter(){
   if(capture) toggleCapture();                     // pysäytä poiminta
   els('capBtn').disabled = true;
-  SIM.active = true; SIM.applied = -1;
+  SIM.active = true; SIM.applied = -1; SIM.all = null;
   SIM.step = Math.min(SIM.step, ROWS.length);
   simRenderTable(); simRenderStep();
   if(!API){ setStatus('Ei yhteyttä Trimble Connectiin – askellus näkyy vain listassa.','warn'); return; }
