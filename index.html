@@ -56,6 +56,30 @@
   .pill{ display:inline-block; background:#eef4fa; color:var(--blue); border-radius:20px; padding:2px 10px; font-size:12px; }
   .empty{ padding:26px; text-align:center; color:#8a929c; }
   .hint{ color:#788; font-size:11.5px; margin:8px 0 4px; }
+  /* --- Asennuksen toteutus (askellus) --- */
+  .sim-head{ display:flex; flex-wrap:wrap; gap:14px; align-items:center; }
+  .sim-step{ font-size:30px; font-weight:700; color:var(--blue); line-height:1; min-width:84px; }
+  .sim-step small{ font-size:15px; color:#8a929c; font-weight:600; }
+  .sim-info{ flex:1; min-width:160px; }
+  .sim-mark{ font-size:18px; font-weight:700; }
+  .sim-meta{ color:#556; font-size:12px; margin-top:3px; }
+  .sim-prog{ width:100%; }
+  .sim-bar{ height:8px; background:#e8ecf1; border-radius:6px; overflow:hidden; }
+  .sim-bar i{ display:block; height:100%; width:0; background:var(--blue); transition:width .25s; }
+  .sim-progtxt{ font-size:11.5px; color:#667; margin-top:4px; }
+  .sim-ctrl{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:12px 0 6px; }
+  .sim-ctrl .btn{ padding:8px 12px; }
+  .sim-ctrl .btn.sec{ font-size:15px; line-height:1; }
+  #simRange{ width:100%; margin:6px 0 2px; accent-color:var(--blue); }
+  .sim-opts{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; font-size:12px; color:#556; margin-bottom:10px; }
+  .sim-opts select{ width:auto; padding:5px 6px; font-size:12px; }
+  .legend{ display:inline-flex; align-items:center; gap:5px; }
+  .legend i{ width:12px; height:12px; border-radius:3px; display:inline-block; border:1px solid rgba(0,0,0,.15); }
+  #bodySim tr.s-done td{ color:#7a828c; }
+  #bodySim tr.s-cur td{ background:#fff1dc !important; font-weight:700; }
+  #bodySim tr.s-cur td:first-child{ box-shadow:inset 4px 0 0 #ff8800; }
+  #bodySim tr.s-todo td{ color:#1c2126; }
+  .stat{ width:22px; text-align:center; }
   @media print{
     header,.panel.controls,.tabs .tab:not(.active),.row-actions,.drag,.col3d,.actcol,.no-print{ display:none !important; }
     .tablewrap{ max-height:none; border:none; overflow:visible; } th{ position:static; }
@@ -100,6 +124,7 @@
   <div class="tabs">
     <button class="tab active" data-tab="asennus">Asennusjärjestys</button>
     <button class="tab" data-tab="rahti">Rahtiluettelo</button>
+    <button class="tab" data-tab="sim">Asennuksen toteutus</button>
   </div>
 
   <!-- ASENNUSJÄRJESTYS -->
@@ -177,6 +202,64 @@
       </table>
     </div>
   </div>
+
+  <!-- ASENNUKSEN TOTEUTUS -->
+  <div class="panel" id="tab-sim" style="display:none">
+    <div class="sim-head">
+      <div class="sim-step"><span id="simNo">0</span><small> / <span id="simTot">0</span></small></div>
+      <div class="sim-info">
+        <div class="sim-mark" id="simMark">—</div>
+        <div class="sim-meta" id="simMeta">Ei vielä asennettu yhtään kappaletta.</div>
+      </div>
+      <div class="sim-prog">
+        <div class="sim-bar"><i id="simBar"></i></div>
+        <div class="sim-progtxt" id="simProgTxt"></div>
+      </div>
+    </div>
+
+    <input type="range" id="simRange" min="0" max="0" value="0" step="1" />
+
+    <div class="sim-ctrl">
+      <button class="btn sec" id="simFirst" title="Alkuun (Home)">⏮</button>
+      <button class="btn sec" id="simPrev" title="Edellinen (←)">‹</button>
+      <button class="btn" id="simPlay" title="Toista / tauko (välilyönti)">▶ Toista</button>
+      <button class="btn sec" id="simNext" title="Seuraava (→)">›</button>
+      <button class="btn sec" id="simLast" title="Loppuun (End)">⏭</button>
+      <span style="flex:1"></span>
+      <button class="btn sec" id="simZoom" style="font-size:13px" title="Zoomaa nykyiseen kappaleeseen">Zoomaa</button>
+      <button class="btn sec" id="simFit" style="font-size:13px" title="Näytä koko malli">Koko malli</button>
+    </div>
+
+    <div class="sim-opts">
+      <label>Nopeus
+        <select id="simSpeed">
+          <option value="500">0,5 s / kpl</option>
+          <option value="1000">1 s / kpl</option>
+          <option value="1500" selected>1,5 s / kpl</option>
+          <option value="2500">2,5 s / kpl</option>
+          <option value="4000">4 s / kpl</option>
+        </select>
+      </label>
+      <label>Muut mallin osat
+        <select id="simOthers">
+          <option value="ghost" selected>Läpikuultava</option>
+          <option value="hide">Piilossa</option>
+          <option value="normal">Normaali</option>
+        </select>
+      </label>
+      <span class="legend"><i style="background:#9aa0a8"></i>Asennettu</span>
+      <span class="legend"><i style="background:#ff8800"></i>Asennetaan nyt</span>
+      <span class="legend"><i style="background:#fff;border-style:dashed"></i>Tulossa (piilossa)</span>
+    </div>
+    <p class="hint no-print">Näppäimet: ← → askel, välilyönti toista/tauko, Home/End alkuun/loppuun. Klikkaa riviä tai asennettua kappaletta mallissa hypätäksesi siihen vaiheeseen. Malli palautuu normaaliksi, kun vaihdat välilehteä.</p>
+
+    <div class="tablewrap" style="max-height:38vh">
+      <table id="tblSim">
+        <thead><tr><th class="stat"></th><th class="num">Nro</th><th>Tunnus</th><th class="num">Paino (kg)</th><th class="num">Kertymä (kg)</th><th class="num">Kuorma</th></tr></thead>
+        <tbody id="bodySim"><tr><td colspan="6" class="empty">Ei vielä poimintoja.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -241,6 +324,7 @@ let projectName = '';         // Trimble-projektin nimi (aikataulun otsikkoon)
 /* ===================== Poiminta ===================== */
 async function toggleCapture(){
   if(!API){ setStatus('Ei yhteyttä Trimble Connectiin.','warn'); return; }
+  if(SIM.active && !capture){ setStatus('Poiminta ei ole käytössä askellustilassa. Vaihda Asennusjärjestys-välilehdelle.','warn'); return; }
   capture = !capture;
   const btn = els('capBtn');
   if(capture){
@@ -278,6 +362,11 @@ function syncHighlightFromModel(sel){
   if(selectedKeys.size === 0) anchorKey = null;
   else if(!anchorKey || !selectedKeys.has(anchorKey)) anchorKey = [...selectedKeys][0];  // säilytä Shift-ankkuri jos yhä valittu
   highlightActive();
+  if(SIM.active && !SIM.playing && selectedKeys.size === 1){            // askellustilassa: hyppää mallista klikattuun kappaleeseen
+    const k = [...selectedKeys][0];
+    const idx = ROWS.findIndex(r => (r.ref.modelId + '|' + r.ref.id) === k);
+    if(idx >= 0 && idx+1 !== SIM.step) simGoto(idx+1);
+  }
 }
 
 // Varmistus: tarkkaile mallin valintaa myös silloin kun tapahtumaa ei tule
@@ -399,7 +488,7 @@ function deriveRows(){
 }
 
 /* ===================== Renderöinti ===================== */
-function render(){ renderAsennus(); renderRahti(); attachRowClicks(els('bodyAs')); attachRowClicks(els('bodyRa')); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; }
+function render(){ renderAsennus(); renderRahti(); attachRowClicks(els('bodyAs')); attachRowClicks(els('bodyRa')); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; if(SIM.active) simListChanged(); }
 
 function renderAsennus(){
   const tb = els('bodyAs');
@@ -750,7 +839,200 @@ function showTab(name){
   document.querySelectorAll('.tab').forEach(t=> t.classList.toggle('active', t.dataset.tab===name));
   els('tab-asennus').style.display = name==='asennus' ? 'block':'none';
   els('tab-rahti').style.display   = name==='rahti'   ? 'block':'none';
+  els('tab-sim').style.display     = name==='sim'     ? 'block':'none';
+  if(name==='sim') simEnter(); else if(SIM.active) simExit();
 }
+
+
+/* ===================== Asennuksen toteutus (askellus) =====================
+   Step k = number of installed pieces. Rows 0..k-2 are "done" (grey),
+   row k-1 is "current" (highlighted), rows k..n-1 are "todo" (hidden).
+   Viewer updates are serialized; single steps are applied incrementally,
+   jumps re-apply the whole state. */
+const SIM = {
+  active:false, step:0, applied:-1, playing:false, timer:null,
+  ids:new Map(),          // rowKey -> [assemblyId, ...descendant runtime ids]
+  syncP:null, cum:[]
+};
+const C_DONE  = { r:154, g:160, b:168, a:255 };
+const C_CUR   = { r:255, g:136, b:0,   a:255 };
+const C_GHOST = { r:205, g:210, b:216, a:40  };
+const rk = r => r.ref.modelId + '|' + r.ref.id;
+
+async function simExpandIds(rows){
+  const need = rows.filter(r => !SIM.ids.has(rk(r)));
+  if(!need.length || !API) return;
+  setStatus(`Valmistellaan askellusta… (${need.length} kokoonpanoa)`);
+  const one = async r => {
+    const ids = [r.ref.id];
+    try{
+      const ch = await API.viewer.getHierarchyChildren(r.ref.modelId, [r.ref.id], undefined, true);
+      (ch||[]).forEach(c => { const cid = c && (c.id ?? c.entityId ?? c.runtimeId); if(cid != null && cid !== r.ref.id) ids.push(cid); });
+    }catch(e){ /* fallback: assembly id only */ }
+    SIM.ids.set(rk(r), ids);
+  };
+  for(let i=0; i<need.length; i+=8) await Promise.all(need.slice(i, i+8).map(one));   // small parallel batches
+  setStatus(`Askellus valmis: ${ROWS.length} kokoonpanoa.`, 'ok');
+}
+function simSelector(rows){
+  const byModel = {};
+  rows.forEach(r => { const ids = SIM.ids.get(rk(r)) || [r.ref.id]; (byModel[r.ref.modelId] ??= []).push(...ids); });
+  return { modelObjectIds: Object.entries(byModel).map(([modelId, objectRuntimeIds]) => ({ modelId, objectRuntimeIds })) };
+}
+async function simState(rows, state){
+  if(!API || !rows.length) return;
+  try{ await API.viewer.setObjectState(simSelector(rows), state); }catch(e){ console.warn('setObjectState', e); }
+}
+async function simBase(){
+  if(!API) return;
+  const mode = els('simOthers').value;
+  const st = mode==='hide' ? { visible:false }
+           : mode==='ghost' ? { visible:true, color:C_GHOST }
+           : { visible:'reset', color:'reset' };
+  try{ await API.viewer.setObjectState(undefined, st); }catch(e){ console.warn('setObjectState(all)', e); }
+}
+async function simApplyFull(k){
+  await simBase();
+  await simState(ROWS.slice(k), { visible:false });                         // tulossa
+  await simState(ROWS.slice(0, Math.max(0, k-1)), { visible:true, color:C_DONE });   // asennettu
+  if(k > 0) await simState([ROWS[k-1]], { visible:true, color:C_CUR });     // nyt
+}
+function simSync(){
+  if(SIM.syncP) return SIM.syncP;
+  SIM.syncP = (async () => {
+    while(SIM.active && SIM.applied !== SIM.step){
+      const k = SIM.step, a = SIM.applied;
+      if(a >= 0 && k === a+1){                          // one step forward
+        if(a > 0) await simState([ROWS[a-1]], { visible:true, color:C_DONE });
+        await simState([ROWS[k-1]], { visible:true, color:C_CUR });
+      }else if(a >= 0 && k === a-1){                    // one step back
+        await simState([ROWS[a-1]], { visible:false });
+        if(k > 0) await simState([ROWS[k-1]], { visible:true, color:C_CUR });
+      }else{
+        await simApplyFull(k);
+      }
+      SIM.applied = k;
+    }
+  })().finally(() => { SIM.syncP = null; });
+  return SIM.syncP;
+}
+function simGoto(k){
+  SIM.step = Math.max(0, Math.min(ROWS.length, k|0));
+  simRenderStep();
+  return simSync();
+}
+function simRenderTable(){
+  const tb = els('bodySim');
+  let c = 0; SIM.cum = ROWS.map(r => (c += (r.weight||0)));
+  els('simRange').max = ROWS.length;
+  els('simTot').textContent = ROWS.length;
+  if(!ROWS.length){ tb.innerHTML = '<tr><td colspan="6" class="empty">Ei vielä poimintoja. Tee asennusjärjestys ensin.</td></tr>'; return; }
+  tb.innerHTML = ROWS.map((r,i) =>
+    `<tr data-i="${i}" style="cursor:pointer"><td class="stat"></td><td class="num seqno">${r.seq}</td><td>${escapeHtml(r.mark)}</td>`+
+    `<td class="num">${fmt(r.weight)}</td><td class="num">${fmt(+SIM.cum[i].toFixed(1))}</td><td class="num">${r.load===''||r.load==null?'':r.load}</td></tr>`).join('');
+  tb.querySelectorAll('tr[data-i]').forEach(tr => tr.addEventListener('click', () => { simPause(); simGoto(+tr.dataset.i + 1); }));
+}
+function simRenderStep(){
+  const n = ROWS.length, k = SIM.step;
+  els('simNo').textContent = k;
+  els('simRange').value = k;
+  const tot = n ? SIM.cum[n-1] : 0, done = k ? SIM.cum[k-1] : 0;
+  const pct = tot > 0 ? Math.round(done/tot*100) : (n ? Math.round(k/n*100) : 0);
+  els('simBar').style.width = pct + '%';
+  els('simProgTxt').textContent = n ? `Asennettu ${k}/${n} kpl · ${fmt(+done.toFixed(1))} / ${fmt(+tot.toFixed(1))} kg (${pct} %)` : '';
+  if(k > 0){
+    const r = ROWS[k-1];
+    els('simMark').textContent = r.mark;
+    const parts = [];
+    if(r.weight) parts.push(fmt(r.weight)+' kg');
+    if(isFinite(num(r.length)) && num(r.length)) parts.push('L '+fmt(num(r.length))+' mm');
+    if(r.load !== '' && r.load != null) parts.push('Kuorma '+r.load);
+    const next = ROWS[k];
+    parts.push(next ? 'Seuraavaksi: '+next.mark : 'Viimeinen kappale');
+    els('simMeta').textContent = parts.join(' · ');
+  }else{
+    els('simMark').textContent = '—';
+    els('simMeta').textContent = n ? 'Ei vielä asennettu yhtään kappaletta. Ensimmäisenä: ' + ROWS[0].mark : 'Lista on tyhjä.';
+  }
+  const rows = els('bodySim').querySelectorAll('tr[data-i]');
+  rows.forEach(tr => {
+    const i = +tr.dataset.i;
+    const st = i < k-1 ? 'done' : i === k-1 ? 'cur' : 'todo';
+    tr.className = 's-'+st;
+    tr.firstChild.textContent = st==='done' ? '✓' : st==='cur' ? '●' : '';
+  });
+  const cur = rows[k-1];
+  if(cur){ const wrap = els('bodySim').closest('.tablewrap'); const top = cur.offsetTop - wrap.clientHeight/2; wrap.scrollTop = Math.max(0, top); }
+  ['simPrev','simFirst'].forEach(id => els(id).disabled = k <= 0);
+  ['simNext','simLast'].forEach(id => els(id).disabled = k >= n);
+  els('simPlay').disabled = !n;
+}
+function simPlay(){
+  if(!ROWS.length) return;
+  if(SIM.step >= ROWS.length) simGoto(0);
+  SIM.playing = true;
+  els('simPlay').textContent = '⏸ Tauko';
+  const tick = async () => {
+    if(!SIM.playing || !SIM.active) return;
+    if(SIM.step >= ROWS.length){ simPause(); return; }
+    await simGoto(SIM.step + 1);
+    if(SIM.playing) SIM.timer = setTimeout(tick, +els('simSpeed').value || 1500);
+  };
+  SIM.timer = setTimeout(tick, 150);
+}
+function simPause(){
+  SIM.playing = false;
+  clearTimeout(SIM.timer); SIM.timer = null;
+  els('simPlay').textContent = '▶ Toista';
+}
+async function simEnter(){
+  if(capture) toggleCapture();                     // pysäytä poiminta
+  els('capBtn').disabled = true;
+  SIM.active = true; SIM.applied = -1;
+  SIM.step = Math.min(SIM.step, ROWS.length);
+  simRenderTable(); simRenderStep();
+  if(!API){ setStatus('Ei yhteyttä Trimble Connectiin – askellus näkyy vain listassa.','warn'); return; }
+  programmatic = true;
+  try{ await API.viewer.setSelection({ modelObjectIds:[] }, 'set'); }catch(e){}   // valinnan korostus peittäisi värit
+  setTimeout(() => { programmatic = false; }, 400);
+  await simExpandIds(ROWS);
+  simSync();
+}
+async function simExit(){
+  simPause();
+  SIM.active = false; SIM.applied = -1;
+  els('capBtn').disabled = false;
+  if(SIM.syncP){ try{ await SIM.syncP; }catch(e){} }
+  if(API){ try{ await API.viewer.setObjectState(undefined, { visible:'reset', color:'reset' }); }catch(e){ console.warn(e); } }
+}
+async function simListChanged(){
+  SIM.step = Math.min(SIM.step, ROWS.length);
+  SIM.applied = -1;
+  simRenderTable(); simRenderStep();
+  await simExpandIds(ROWS);
+  simSync();
+}
+
+els('simFirst').addEventListener('click', () => { simPause(); simGoto(0); });
+els('simPrev').addEventListener('click',  () => { simPause(); simGoto(SIM.step-1); });
+els('simNext').addEventListener('click',  () => { simPause(); simGoto(SIM.step+1); });
+els('simLast').addEventListener('click',  () => { simPause(); simGoto(ROWS.length); });
+els('simPlay').addEventListener('click',  () => SIM.playing ? simPause() : simPlay());
+els('simRange').addEventListener('input', e => { simPause(); simGoto(+e.target.value); });
+els('simOthers').addEventListener('change', () => { if(SIM.active){ SIM.applied = -1; simSync(); } });
+els('simZoom').addEventListener('click', async () => {
+  if(!API || SIM.step < 1) return;
+  try{ await API.viewer.setCamera(simSelector([ROWS[SIM.step-1]])); }catch(e){}
+});
+els('simFit').addEventListener('click', async () => { if(API){ try{ await API.viewer.setCamera('reset'); }catch(e){} } });
+document.addEventListener('keydown', e => {
+  if(!SIM.active || e.target.closest('input, select, textarea')) return;
+  if(e.key === 'ArrowRight'){ e.preventDefault(); simPause(); simGoto(SIM.step+1); }
+  else if(e.key === 'ArrowLeft'){ e.preventDefault(); simPause(); simGoto(SIM.step-1); }
+  else if(e.key === ' '){ e.preventDefault(); SIM.playing ? simPause() : simPlay(); }
+  else if(e.key === 'Home'){ e.preventDefault(); simPause(); simGoto(0); }
+  else if(e.key === 'End'){ e.preventDefault(); simPause(); simGoto(ROWS.length); }
+});
 
 connect();
 </script>
