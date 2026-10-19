@@ -899,20 +899,50 @@ async function simAllObjects(){
   SIM.all = list;
   return list;
 }
+// Ancestors (parent assemblies, storeys, building...) of every list piece, cached per row.
+// These must never be hidden: a hidden parent keeps its children hidden too.
+async function simAncestors(rows){
+  SIM.anc ??= new Map();
+  const need = rows.filter(r => !SIM.anc.has(rk(r)));
+  const one = async r => {
+    const ids = [];
+    try{
+      const par = await API.viewer.getHierarchyParents(r.ref.modelId, [r.ref.id], undefined, true);
+      (par||[]).forEach(p => { const pid = p && (p.id ?? p.entityId ?? p.runtimeId); if(pid != null) ids.push(pid); });
+    }catch(e){}
+    SIM.anc.set(rk(r), ids);
+  };
+  for(let i=0; i<need.length; i+=8) await Promise.all(need.slice(i, i+8).map(one));
+}
 async function simBase(){
   if(!API) return;
   const mode = els('simOthers').value;
   if(mode === 'hide'){
-    // first make everything "normal" again, then hide every object by explicit id
     try{ await API.viewer.setObjectState(undefined, { visible:'reset', color:'reset' }); }catch(e){}
     const all = await simAllObjects();
-    if(!all.length){ try{ await API.viewer.setObjectState(undefined, { visible:false }); }catch(e){} return; }
+    await simAncestors(ROWS);
+    // keep = list pieces (assembly + parts) + all their ancestors
+    const keep = new Set();
+    ROWS.forEach(r => {
+      (SIM.ids.get(rk(r)) || [r.ref.id]).forEach(id => keep.add(r.ref.modelId + '|' + id));
+      (SIM.anc.get(rk(r)) || []).forEach(id => keep.add(r.ref.modelId + '|' + id));
+    });
+    let hidden = 0;
     const B = 5000;
     for(const m of all){
-      for(let i=0; i<m.ids.length; i+=B){
-        try{ await API.viewer.setObjectState({ modelObjectIds:[{ modelId:m.modelId, objectRuntimeIds:m.ids.slice(i,i+B) }] }, { visible:false }); }
+      const ids = m.ids.filter(id => !keep.has(m.modelId + '|' + id));
+      hidden += ids.length;
+      for(let i=0; i<ids.length; i+=B){
+        try{ await API.viewer.setObjectState({ modelObjectIds:[{ modelId:m.modelId, objectRuntimeIds:ids.slice(i,i+B) }] }, { visible:false }); }
         catch(e){ console.warn('setObjectState(hide)', e); }
       }
+    }
+    if(!all.length){
+      // Could not list model objects: fall back to fully transparent (never hide the whole model)
+      try{ await API.viewer.setObjectState(undefined, { visible:true, color:{ r:255, g:255, b:255, a:0 } }); }catch(e){}
+      setStatus('Mallin objektilistaa ei saatu – muut osat näytetään täysin läpinäkyvinä.', 'warn');
+    }else{
+      setStatus(`Piilossa-tila: piilotettu ${hidden} muuta objektia (${all.length} mallia).`, 'ok');
     }
     return;
   }
