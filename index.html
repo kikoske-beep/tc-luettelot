@@ -122,15 +122,10 @@
       </label>
     </div>
     <div class="save-row no-print">
-      <span class="save-lbl">Tallennetut listat</span>
-      <input type="text" id="saveName" placeholder="Nimi, esim. Halli A – runko" style="width:190px">
-      <button class="btn sec" id="saveBtn" title="Tallenna nykyinen lista tällä nimellä">💾 Tallenna</button>
-      <select id="saveSel" style="width:auto;min-width:170px"><option value="">— valitse tallennus —</option></select>
-      <button class="btn sec" id="loadBtn">Lataa</button>
-      <button class="btn sec" id="delSaveBtn" title="Poista valittu tallennus">Poista</button>
-      <span style="flex:1"></span>
-      <button class="btn sec" id="exportJson" title="Tallenna lista tiedostoon (voi jakaa tai tallentaa Trimble Connectin kansioon)">Vie tiedostoon</button>
-      <button class="btn sec" id="importJson">Tuo tiedostosta</button>
+      <span class="save-lbl">Asennuslista</span>
+      <input type="text" id="saveName" placeholder="Tiedoston nimi, esim. Halli A – runko" style="width:230px">
+      <button class="btn" id="exportJson" title="Tallenna lista tiedostoon (Lataukset-kansioon)">💾 Tallenna</button>
+      <button class="btn sec" id="importJson" title="Lataa aiemmin tallennettu lista tiedostosta">📂 Lataa</button>
       <input type="file" id="importFile" accept=".json,application/json" style="display:none">
     </div>
     <div class="save-row no-print" id="restoreRow" style="display:none">
@@ -1224,40 +1219,6 @@ async function restoreList(data){
   }
 }
 
-/* --- named saves in this browser --- */
-function refreshSaveSel(){
-  const st = storeRead();
-  const names = Object.keys(st.saves || {}).sort(naturalCompare);
-  const sel = els('saveSel'), prev = sel.value;
-  sel.innerHTML = '<option value="">— valitse tallennus —</option>' + names.map(n => {
-    const d = st.saves[n]; const when = d.savedAt ? new Date(d.savedAt).toLocaleString('fi-FI',{dateStyle:'short',timeStyle:'short'}) : '';
-    return `<option value="${escapeHtml(n)}">${escapeHtml(n)} (${(d.items||[]).length} kpl, ${when})</option>`;
-  }).join('');
-  if(names.includes(prev)) sel.value = prev;
-}
-async function saveNamed(){
-  if(!RAW.length){ setStatus('Lista on tyhjä – ei tallennettavaa.','warn'); return; }
-  let name = els('saveName').value.trim() || els('saveSel').value;
-  if(!name) name = 'Lista ' + new Date().toLocaleString('fi-FI',{dateStyle:'short',timeStyle:'short'});
-  const data = await serializeList(name);
-  const st = storeRead(); st.saves ??= {}; st.saves[name] = data;
-  if(storeWrite(st)){
-    refreshSaveSel(); els('saveSel').value = name; els('saveName').value = '';
-    const noGuid = data.items.filter(i => !i.guid).length;
-    setStatus(`Tallennettu "${name}" (${data.items.length} kpl).` + (noGuid ? ` Huom: ${noGuid} kpl ilman IFC GUIDia – ne löytyvät vain samasta malliversiosta.` : ''), noGuid ? 'warn' : 'ok');
-  }else setStatus('Tallennus selaimeen epäonnistui. Käytä "Vie tiedostoon".','warn');
-}
-async function loadNamed(){
-  const name = els('saveSel').value; if(!name){ setStatus('Valitse ensin tallennus listasta.','warn'); return; }
-  const d = (storeRead().saves || {})[name];
-  if(d) await restoreList(d);
-}
-function deleteNamed(){
-  const name = els('saveSel').value; if(!name) return;
-  const st = storeRead(); if(st.saves) delete st.saves[name]; storeWrite(st); refreshSaveSel();
-  setStatus(`Tallennus "${name}" poistettu.`);
-}
-
 /* --- automatic save of the working list --- */
 let autosaveT = null, restoring = false;
 function scheduleAutosave(){
@@ -1271,7 +1232,6 @@ function scheduleAutosave(){
   }, 1500);
 }
 function initSaves(){
-  refreshSaveSel();
   const a = storeRead().auto;
   if(a && a.items && a.items.length && !RAW.length){
     const when = a.savedAt ? new Date(a.savedAt).toLocaleString('fi-FI',{dateStyle:'short',timeStyle:'short'}) : '';
@@ -1283,11 +1243,11 @@ function initSaves(){
 /* --- file export / import --- */
 async function exportJsonFile(){
   if(!RAW.length){ setStatus('Lista on tyhjä.','warn'); return; }
-  const name = els('saveName').value.trim() || els('saveSel').value || 'asennusjarjestys';
+  const name = els('saveName').value.trim() || 'asennusjarjestys';
   const data = await serializeList(name);
   const safe = name.replace(/[^\w\-åäöÅÄÖ ]+/g,'_').trim().replace(/\s+/g,'_');
   download(`${safe}.json`, JSON.stringify(data, null, 1), 'application/json');
-  setStatus(`Lista viety tiedostoon ${safe}.json. Voit tallentaa sen Trimble Connectin kansioon muiden käyttöön.`,'ok');
+  setStatus(`Lista tallennettu tiedostoon ${safe}.json (Lataukset-kansio). Avaa se myöhemmin Lataa-napilla.`,'ok');
 }
 function importJsonFile(file){
   const fr = new FileReader();
@@ -1301,9 +1261,6 @@ function importJsonFile(file){
   fr.readAsText(file);
 }
 
-els('saveBtn').addEventListener('click', saveNamed);
-els('loadBtn').addEventListener('click', async () => { restoring = true; try{ await loadNamed(); } finally { restoring = false; scheduleAutosave(); } });
-els('delSaveBtn').addEventListener('click', deleteNamed);
 els('exportJson').addEventListener('click', exportJsonFile);
 els('importJson').addEventListener('click', () => els('importFile').click());
 els('importFile').addEventListener('change', e => { const f = e.target.files[0]; if(f) importJsonFile(f); e.target.value = ''; });
