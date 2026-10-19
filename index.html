@@ -80,6 +80,10 @@
   #bodySim tr.s-cur td:first-child{ box-shadow:inset 4px 0 0 #ff8800; }
   #bodySim tr.s-todo td{ color:#1c2126; }
   .stat{ width:22px; text-align:center; }
+  .save-row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+  .save-row .btn{ padding:6px 10px; font-size:12px; }
+  .save-row select{ padding:5px 6px; font-size:12px; }
+  .save-lbl{ font-size:12px; color:#556; font-weight:600; margin-right:4px; }
   @media print{
     header,.panel.controls,.tabs .tab:not(.active),.row-actions,.drag,.col3d,.actcol,.no-print{ display:none !important; }
     .tablewrap{ max-height:none; border:none; overflow:visible; } th{ position:static; }
@@ -116,6 +120,22 @@
       <label class="fld">Pituus
         <select id="fLength"></select>
       </label>
+    </div>
+    <div class="save-row no-print">
+      <span class="save-lbl">Tallennetut listat</span>
+      <input type="text" id="saveName" placeholder="Nimi, esim. Halli A – runko" style="width:190px">
+      <button class="btn sec" id="saveBtn" title="Tallenna nykyinen lista tällä nimellä">💾 Tallenna</button>
+      <select id="saveSel" style="width:auto;min-width:170px"><option value="">— valitse tallennus —</option></select>
+      <button class="btn sec" id="loadBtn">Lataa</button>
+      <button class="btn sec" id="delSaveBtn" title="Poista valittu tallennus">Poista</button>
+      <span style="flex:1"></span>
+      <button class="btn sec" id="exportJson" title="Tallenna lista tiedostoon (voi jakaa tai tallentaa Trimble Connectin kansioon)">Vie tiedostoon</button>
+      <button class="btn sec" id="importJson">Tuo tiedostosta</button>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none">
+    </div>
+    <div class="save-row no-print" id="restoreRow" style="display:none">
+      <button class="btn" id="restoreAuto"></button>
+      <span class="hint" style="margin:0">Edellisellä kerralla poimittu lista on tallessa tällä koneella.</span>
     </div>
     <div id="status">Avaa 3D-malli. Paina "Aloita poiminta" ja klikkaa kokoonpanoja siinä järjestyksessä kuin ne asennetaan.</div>
   </div>
@@ -277,7 +297,8 @@ async function connect(){
     API = await TrimbleConnectWorkspace.connect(window.parent, onEvent, 30000);
     startSelectionWatch();                                                        // aloita heti, ennen muita awaiteja
     Promise.resolve(API.viewer.setSettings({ assemblySelection:true })).catch(()=>{});  // klikkaus valitsee koko kokoonpanon (ei jää odottamaan)
-    try{ const p = await API.project.getCurrentProject(); if(p&&p.name){ projectName=p.name; els('projname').textContent = '— '+p.name; } }catch(e){}
+    try{ const p = await API.project.getCurrentProject(); if(p&&p.name){ projectName=p.name; els('projname').textContent = '— '+p.name; } if(p&&p.id) projectId=p.id; }catch(e){}
+    initSaves();
     setStatus('Yhteys muodostettu. Paina "Aloita poiminta" ja klikkaa kokoonpanoja mallista.','ok');
   }catch(e){
     setStatus('Yhteyttä ei saatu: '+e+'. Avaa työkalu Trimble Connectin 3D-katselussa.','warn');
@@ -319,6 +340,7 @@ let selectorsInit = false;
 let selectedKeys = new Set(); // korostettujen rivien tunnisteet (modelId|id)
 let anchorKey = null;         // Shift-valinnan ankkuri
 let LOADINFO = {};            // kuorma -> { date:'YYYY-MM-DD', time:'HH:MM' }
+let projectId = '';           // Trimble-projektin id (tallennusten avain)
 let projectName = '';         // Trimble-projektin nimi (aikataulun otsikkoon)
 
 /* ===================== Poiminta ===================== */
@@ -488,7 +510,7 @@ function deriveRows(){
 }
 
 /* ===================== Renderöinti ===================== */
-function render(){ renderAsennus(); renderRahti(); attachRowClicks(els('bodyAs')); attachRowClicks(els('bodyRa')); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; if(SIM.active) simListChanged(); }
+function render(){ renderAsennus(); renderRahti(); attachRowClicks(els('bodyAs')); attachRowClicks(els('bodyRa')); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; if(SIM.active) simListChanged(); scheduleAutosave(); }
 
 function renderAsennus(){
   const tb = els('bodyAs');
@@ -1091,6 +1113,203 @@ document.addEventListener('keydown', e => {
   else if(e.key === 'Home'){ e.preventDefault(); simPause(); simGoto(0); }
   else if(e.key === 'End'){ e.preventDefault(); simPause(); simGoto(ROWS.length); }
 });
+
+
+/* ===================== Tallennus / lataus =====================
+   Pieces are stored by IFC GUID (external id) so a saved list survives page reloads
+   and new model versions. Runtime ids are stored only as a fallback.
+   Storage: localStorage per project (this browser) + JSON file export/import. */
+const STORE_VER = 1;
+const storeKey = () => 'tcl:' + (projectId || projectName || 'default');
+function storeRead(){ try{ return JSON.parse(localStorage.getItem(storeKey()) || '{}') || {}; }catch(e){ return {}; } }
+function storeWrite(obj){ try{ localStorage.setItem(storeKey(), JSON.stringify(obj)); return true; }catch(e){ console.warn('localStorage', e); return false; } }
+
+async function ensureGuids(objs){
+  if(!API) return;
+  const byModel = {};
+  objs.filter(o => !o.__guid).forEach(o => (byModel[o.__modelId] ??= []).push(o));
+  for(const [mid, list] of Object.entries(byModel)){
+    for(let i=0; i<list.length; i+=500){
+      const chunk = list.slice(i, i+500);
+      try{
+        const g = await API.viewer.convertToObjectIds(mid, chunk.map(o => o.id));
+        chunk.forEach((o,j) => { if(g && g[j]) o.__guid = String(g[j]); });
+      }catch(e){ console.warn('convertToObjectIds', e); }
+    }
+  }
+}
+async function serializeList(name){
+  await ensureGuids(RAW);
+  return {
+    app:'tc-luettelot', v:STORE_VER, name: name || '', savedAt: new Date().toISOString(),
+    projectId, projectName,
+    fields:{ mark:els('fMark').value, weight:els('fWeight').value, length:els('fLength').value },
+    maxLoad: els('maxLoad').value, contact: els('metaContact').value, phone: els('metaPhone').value,
+    loadInfo: LOADINFO,
+    items: RAW.map((o,i) => ({ modelId:o.__modelId, guid:o.__guid || '', rid:o.id, load:o.__load ?? '',
+                               mark: ROWS[i] ? ROWS[i].mark : '', weight: ROWS[i] ? ROWS[i].weight : '' }))
+  };
+}
+async function loadedModelIds(){
+  try{ const ms = await API.viewer.getModels('loaded'); return (ms||[]).map(m => m.id || m.modelId).filter(Boolean); }
+  catch(e){ try{ const ms = await API.viewer.getModels(); return (ms||[]).map(m => m.id || m.modelId).filter(Boolean); }catch(_){ return []; } }
+}
+async function guidsToRuntime(modelId, guids){
+  try{ const r = await API.viewer.convertToObjectRuntimeIds(modelId, guids); return (r||[]).map(x => (x==null || x<0) ? null : x); }
+  catch(e){ return guids.map(() => null); }
+}
+async function restoreList(data){
+  if(!API){ setStatus('Ei yhteyttä Trimble Connectiin.','warn'); return; }
+  if(!data || !Array.isArray(data.items)){ setStatus('Tiedosto ei ole asennuslista.','warn'); return; }
+  if(capture) toggleCapture();
+  setStatus(`Ladataan listaa (${data.items.length} kpl)…`);
+  const loaded = await loadedModelIds();
+  const items = data.items.map(it => ({ ...it, rmid:null, rrid:null }));
+  // 1) GUID -> runtime id in the saved model, then in any other loaded model (new version / re-upload)
+  const tryModels = [...new Set([...items.map(i => i.modelId), ...loaded])];
+  for(const mid of tryModels){
+    const todo = items.filter(it => it.rrid==null && it.guid && (it.modelId===mid || loaded.includes(mid)));
+    for(let i=0; i<todo.length; i+=500){
+      const chunk = todo.slice(i, i+500);
+      const r = await guidsToRuntime(mid, chunk.map(it => it.guid));
+      chunk.forEach((it,j) => { if(r[j]!=null){ it.rmid = mid; it.rrid = r[j]; } });
+    }
+  }
+  // 2) fallback: stored runtime id (same model, no GUID)
+  items.forEach(it => { if(it.rrid==null && !it.guid && it.rid!=null && loaded.includes(it.modelId)){ it.rmid = it.modelId; it.rrid = it.rid; } });
+  // 3) fetch properties in saved order
+  const found = items.filter(it => it.rrid!=null);
+  const byModel = {};
+  found.forEach(it => (byModel[it.rmid] ??= []).push(it));
+  for(const [mid, list] of Object.entries(byModel)){
+    for(let i=0; i<list.length; i+=200){
+      const chunk = list.slice(i, i+200);
+      let props = [];
+      try{ props = await API.viewer.getObjectProperties(mid, chunk.map(it => it.rrid)); }catch(e){}
+      chunk.forEach((it,j) => { it.props = props && props[j]; });
+    }
+  }
+  const ok = items.filter(it => it.props);
+  const missing = items.filter(it => !it.props);
+  RAW = []; addedKeys.clear(); selectedKeys.clear(); anchorKey = null;
+  ok.forEach(it => {
+    const o = it.props;
+    o.__modelId = it.rmid; o.__load = it.load ?? ''; o.__guid = it.guid || undefined;
+    o.__keys = [it.rmid + '|' + it.rrid, it.rmid + '|A|' + it.rrid];
+    o.__keys.forEach(k => addedKeys.add(k));
+    RAW.push(o);
+  });
+  LOADINFO = data.loadInfo || {};
+  if(data.maxLoad) els('maxLoad').value = data.maxLoad;
+  if(data.contact != null) els('metaContact').value = data.contact;
+  if(data.phone != null) els('metaPhone').value = data.phone;
+  if(RAW.length){
+    mergeSelectors();
+    const f = data.fields || {};
+    [['fMark',f.mark],['fWeight',f.weight],['fLength',f.length]].forEach(([id,v]) => {
+      if(v && [...els(id).options].some(o => o.value===v)) els(id).value = v;
+    });
+  }
+  SIM.ids.clear(); if(SIM.anc) SIM.anc.clear();
+  deriveRows(); render();
+  fetchDimsFor(RAW).then(() => { assignDims(); deriveRows(); render(); }).catch(() => {});
+  els('restoreRow').style.display = 'none';
+  if(!ok.length && items.length){
+    setStatus('Listan kappaleita ei löytynyt avatuista malleista. Avaa sama malli 3D-näkymään ja lataa uudelleen.','warn');
+  }else if(missing.length){
+    const names = missing.slice(0,8).map(m => m.mark || m.guid).join(', ');
+    setStatus(`Ladattu ${ok.length}/${items.length} kpl. Puuttuu mallista: ${names}${missing.length>8?' …':''}`,'warn');
+  }else{
+    setStatus(`Ladattu "${data.name || 'lista'}": ${ok.length} kpl.`,'ok');
+  }
+}
+
+/* --- named saves in this browser --- */
+function refreshSaveSel(){
+  const st = storeRead();
+  const names = Object.keys(st.saves || {}).sort(naturalCompare);
+  const sel = els('saveSel'), prev = sel.value;
+  sel.innerHTML = '<option value="">— valitse tallennus —</option>' + names.map(n => {
+    const d = st.saves[n]; const when = d.savedAt ? new Date(d.savedAt).toLocaleString('fi-FI',{dateStyle:'short',timeStyle:'short'}) : '';
+    return `<option value="${escapeHtml(n)}">${escapeHtml(n)} (${(d.items||[]).length} kpl, ${when})</option>`;
+  }).join('');
+  if(names.includes(prev)) sel.value = prev;
+}
+async function saveNamed(){
+  if(!RAW.length){ setStatus('Lista on tyhjä – ei tallennettavaa.','warn'); return; }
+  let name = els('saveName').value.trim() || els('saveSel').value;
+  if(!name) name = 'Lista ' + new Date().toLocaleString('fi-FI',{dateStyle:'short',timeStyle:'short'});
+  const data = await serializeList(name);
+  const st = storeRead(); st.saves ??= {}; st.saves[name] = data;
+  if(storeWrite(st)){
+    refreshSaveSel(); els('saveSel').value = name; els('saveName').value = '';
+    const noGuid = data.items.filter(i => !i.guid).length;
+    setStatus(`Tallennettu "${name}" (${data.items.length} kpl).` + (noGuid ? ` Huom: ${noGuid} kpl ilman IFC GUIDia – ne löytyvät vain samasta malliversiosta.` : ''), noGuid ? 'warn' : 'ok');
+  }else setStatus('Tallennus selaimeen epäonnistui. Käytä "Vie tiedostoon".','warn');
+}
+async function loadNamed(){
+  const name = els('saveSel').value; if(!name){ setStatus('Valitse ensin tallennus listasta.','warn'); return; }
+  const d = (storeRead().saves || {})[name];
+  if(d) await restoreList(d);
+}
+function deleteNamed(){
+  const name = els('saveSel').value; if(!name) return;
+  const st = storeRead(); if(st.saves) delete st.saves[name]; storeWrite(st); refreshSaveSel();
+  setStatus(`Tallennus "${name}" poistettu.`);
+}
+
+/* --- automatic save of the working list --- */
+let autosaveT = null, restoring = false;
+function scheduleAutosave(){
+  if(restoring) return;
+  clearTimeout(autosaveT);
+  autosaveT = setTimeout(async () => {
+    const st = storeRead();
+    if(!RAW.length){ if(st.auto){ delete st.auto; storeWrite(st); } return; }
+    st.auto = await serializeList('Viimeisin lista');
+    storeWrite(st);
+  }, 1500);
+}
+function initSaves(){
+  refreshSaveSel();
+  const a = storeRead().auto;
+  if(a && a.items && a.items.length && !RAW.length){
+    const when = a.savedAt ? new Date(a.savedAt).toLocaleString('fi-FI',{dateStyle:'short',timeStyle:'short'}) : '';
+    els('restoreAuto').textContent = `↺ Palauta edellinen lista (${a.items.length} kpl, ${when})`;
+    els('restoreRow').style.display = 'flex';
+  }
+}
+
+/* --- file export / import --- */
+async function exportJsonFile(){
+  if(!RAW.length){ setStatus('Lista on tyhjä.','warn'); return; }
+  const name = els('saveName').value.trim() || els('saveSel').value || 'asennusjarjestys';
+  const data = await serializeList(name);
+  const safe = name.replace(/[^\w\-åäöÅÄÖ ]+/g,'_').trim().replace(/\s+/g,'_');
+  download(`${safe}.json`, JSON.stringify(data, null, 1), 'application/json');
+  setStatus(`Lista viety tiedostoon ${safe}.json. Voit tallentaa sen Trimble Connectin kansioon muiden käyttöön.`,'ok');
+}
+function importJsonFile(file){
+  const fr = new FileReader();
+  fr.onload = async () => {
+    let data; try{ data = JSON.parse(fr.result); }catch(e){ setStatus('Tiedostoa ei voitu lukea (ei JSON).','warn'); return; }
+    if(data.app !== 'tc-luettelot'){ setStatus('Tiedosto ei ole tämän työkalun asennuslista.','warn'); return; }
+    restoring = true;
+    try{ await restoreList(data); } finally { restoring = false; scheduleAutosave(); }
+    if(data.name) els('saveName').value = data.name;
+  };
+  fr.readAsText(file);
+}
+
+els('saveBtn').addEventListener('click', saveNamed);
+els('loadBtn').addEventListener('click', async () => { restoring = true; try{ await loadNamed(); } finally { restoring = false; scheduleAutosave(); } });
+els('delSaveBtn').addEventListener('click', deleteNamed);
+els('exportJson').addEventListener('click', exportJsonFile);
+els('importJson').addEventListener('click', () => els('importFile').click());
+els('importFile').addEventListener('change', e => { const f = e.target.files[0]; if(f) importJsonFile(f); e.target.value = ''; });
+els('restoreAuto').addEventListener('click', async () => { restoring = true; try{ await restoreList(storeRead().auto); } finally { restoring = false; } });
+['maxLoad','metaContact','metaPhone'].forEach(id => els(id).addEventListener('change', scheduleAutosave));
+document.addEventListener('change', e => { if(e.target.closest('#bodyRa, #bodySum')) scheduleAutosave(); });
 
 connect();
 </script>
