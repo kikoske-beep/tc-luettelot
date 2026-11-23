@@ -109,6 +109,15 @@
       <button class="btn sec" id="undoBtn" title="Poista viimeksi lisätty">↶ Kumoa viimeinen</button>
       <button class="btn sec" id="clearBtn">Tyhjennä lista</button>
     </div>
+    <div class="save-row no-print" id="markRow">
+      <span class="save-lbl">Poimitut mallissa</span>
+      <select id="markMode" title="Miten jo poimitut kokoonpanot näytetään 3D-mallissa">
+        <option value="ghost" selected>Läpikuultava</option>
+        <option value="color">Vihreä</option>
+        <option value="off">Ei merkintää</option>
+      </select>
+      <span class="legend" id="markLegend"><i style="background:rgba(140,150,165,.35)"></i>= jo listalla</span>
+    </div>
 
     <div class="grid" id="mapGrid" style="margin-top:12px;display:none">
       <label class="fld">Tunnus (asennusjärjestyksen peruste)
@@ -505,7 +514,7 @@ function deriveRows(){
 }
 
 /* ===================== Renderöinti ===================== */
-function render(){ renderAsennus(); renderRahti(); attachRowClicks(els('bodyAs')); attachRowClicks(els('bodyRa')); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; if(SIM.active) simListChanged(); scheduleAutosave(); }
+function render(){ renderAsennus(); renderRahti(); attachRowClicks(els('bodyAs')); attachRowClicks(els('bodyRa')); highlightActive(); const n=RAW.length; els('countPill').textContent = n+' kokoonpanoa'; if(SIM.active) simListChanged(); else markSync(); scheduleAutosave(); }
 
 function renderAsennus(){
   const tb = els('bodyAs');
@@ -861,6 +870,75 @@ function showTab(name){
 }
 
 
+/* ===================== Poimittujen merkintä mallissa =====================
+   Picked assemblies (assembly + all parts) get a colour override so the user
+   sees in the model what is already on the list. Updates are incremental and
+   serialized: only added rows are coloured, removed rows are reset. */
+const C_PICKED = {
+  ghost: { r:140, g:150, b:165, a:70 },   // translucent grey-blue
+  color: { r:30,  g:170, b:90,  a:255 }   // solid green
+};
+const MARK = { applied:new Map(), mode:null, chain:Promise.resolve() };   // rowKey -> { modelId, ids }
+
+async function markExpand(rows){
+  const need = rows.filter(r => !SIM.ids.has(rk(r)));
+  const one = async r => {
+    const ids = [r.ref.id];
+    try{
+      const ch = await API.viewer.getHierarchyChildren(r.ref.modelId, [r.ref.id], undefined, true);
+      (ch||[]).forEach(c => { const cid = c && (c.id ?? c.entityId ?? c.runtimeId); if(cid != null && cid !== r.ref.id) ids.push(cid); });
+    }catch(e){ /* fallback: assembly id only */ }
+    SIM.ids.set(rk(r), ids);
+  };
+  for(let i=0; i<need.length; i+=8) await Promise.all(need.slice(i, i+8).map(one));
+}
+async function markSetState(entries, state){
+  const byModel = {};
+  entries.forEach(e => (byModel[e.modelId] ??= []).push(...e.ids));
+  const B = 5000;
+  for(const [modelId, ids] of Object.entries(byModel)){
+    for(let i=0; i<ids.length; i+=B){
+      if(SIM.active) return;   // sim took over the model
+      try{ await API.viewer.setObjectState({ modelObjectIds:[{ modelId, objectRuntimeIds:ids.slice(i,i+B) }] }, state); }
+      catch(e){ console.warn('setObjectState(mark)', e); }
+    }
+  }
+}
+async function markReset(keys){
+  if(!keys.length) return;
+  const entries = keys.map(k => MARK.applied.get(k)).filter(Boolean);
+  keys.forEach(k => MARK.applied.delete(k));
+  await markSetState(entries, { color:'reset' });
+}
+async function markApply(){
+  if(!API || SIM.active) return;
+  const mode = els('markMode').value;
+  if(MARK.mode !== mode){                      // mode changed: clear old colouring first
+    await markReset([...MARK.applied.keys()]);
+    MARK.mode = mode;
+  }
+  const want = (mode === 'off') ? [] : ROWS.slice();
+  const wantKeys = new Set(want.map(rk));
+  await markReset([...MARK.applied.keys()].filter(k => !wantKeys.has(k)));   // removed from list
+  const add = want.filter(r => !MARK.applied.has(rk(r)));
+  if(!add.length || SIM.active) return;
+  await markExpand(add);
+  if(SIM.active) return;
+  const entries = add.map(r => ({ modelId:r.ref.modelId, ids:SIM.ids.get(rk(r)) || [r.ref.id] }));
+  add.forEach((r,i) => MARK.applied.set(rk(r), entries[i]));
+  await markSetState(entries, { color:C_PICKED[mode] });
+}
+function markSync(){
+  MARK.chain = MARK.chain.then(markApply).catch(e => console.warn('markSync', e));
+  return MARK.chain;
+}
+function markLegend(){
+  const m = els('markMode').value;
+  els('markLegend').style.display = m === 'off' ? 'none' : 'inline-flex';
+  els('markLegend').querySelector('i').style.background = m === 'color' ? 'rgb(30,170,90)' : 'rgba(140,150,165,.35)';
+}
+els('markMode').addEventListener('change', () => { markLegend(); MARK.mode = '__force__'; markSync(); });
+
 /* ===================== Asennuksen toteutus (askellus) =====================
    Step k = number of installed pieces. Rows 0..k-2 are "done" (grey),
    row k-1 is "current" (highlighted), rows k..n-1 are "todo" (hidden).
@@ -1066,6 +1144,8 @@ async function simEnter(){
   SIM.active = true; SIM.applied = -1; SIM.all = null;
   SIM.step = Math.min(SIM.step, ROWS.length);
   simRenderTable(); simRenderStep();
+  try{ await MARK.chain; }catch(e){}                // wait for a running mark update
+  MARK.applied.clear(); MARK.mode = null;           // sim owns the model state now
   if(!API){ setStatus('Ei yhteyttä Trimble Connectiin – askellus näkyy vain listassa.','warn'); return; }
   programmatic = true;
   try{ await API.viewer.setSelection({ modelObjectIds:[] }, 'set'); }catch(e){}   // valinnan korostus peittäisi värit
@@ -1079,6 +1159,8 @@ async function simExit(){
   els('capBtn').disabled = false;
   if(SIM.syncP){ try{ await SIM.syncP; }catch(e){} }
   if(API){ try{ await API.viewer.setObjectState(undefined, { visible:'reset', color:'reset' }); }catch(e){ console.warn(e); } }
+  MARK.applied.clear(); MARK.mode = null;
+  markSync();                                       // show picked assemblies again
 }
 async function simListChanged(){
   SIM.step = Math.min(SIM.step, ROWS.length);
