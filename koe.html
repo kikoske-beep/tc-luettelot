@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trutec – Asennuskuittaus (koe)</title>
+<script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<style>
+  :root{ --blue:#005f9e; --blue-d:#004a7c; --line:#e2e5ea; --bg:#f5f6f8; --ok:#1a7f37; --warn:#b35900; --red:#c0392b; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; }
+  body{ font-family:"Segoe UI",system-ui,sans-serif; color:#1c2126; background:var(--bg); font-size:14px; }
+  header{ background:var(--blue); color:#fff; padding:10px 14px; font-weight:600; font-size:15px; }
+  header small{ font-weight:400; opacity:.85; }
+  .wrap{ padding:12px; }
+  .panel{ background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .panel h2{ margin:0 0 8px; font-size:13px; color:var(--blue); text-transform:uppercase; letter-spacing:.03em; }
+  .row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .btn{ background:var(--blue); color:#fff; border:none; border-radius:8px; padding:12px 18px; font-size:15px; cursor:pointer; font-weight:600; min-height:44px; }
+  .btn:hover{ background:var(--blue-d); }
+  .btn.sec{ background:#eef1f5; color:#2a2f36; border:1px solid #d3d8df; font-weight:500; }
+  .btn.ok{ background:var(--ok); }
+  .btn.red{ background:var(--red); }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .res{ font-weight:600; margin-left:4px; }
+  .res.ok{ color:var(--ok); } .res.fail{ color:var(--red); } .res.run{ color:var(--warn); }
+  select{ padding:8px; border:1px solid #c7ccd4; border-radius:6px; font-size:14px; }
+  #info{ font-size:13px; color:#445; line-height:1.6; }
+  #log{ background:#111820; color:#d6e2ee; font:12px/1.45 Consolas,monospace; padding:10px; border-radius:6px; height:300px; overflow:auto; white-space:pre-wrap; }
+  .hint{ font-size:12px; color:#667; margin-top:6px; }
+</style>
+</head>
+<body>
+<header>Asennuskuittaus – koe <small>Property Set -palvelun testi</small></header>
+<div class="wrap">
+
+  <div class="panel">
+    <h2>Yhteys</h2>
+    <div id="info">Yhdistetään Trimble Connectiin…</div>
+    <div class="row" style="margin-top:8px">
+      <label>Palvelualue:
+        <select id="region">
+          <option value="eu-west-1">Eurooppa (eu-west-1)</option>
+          <option value="eu-west-2">UK (eu-west-2)</option>
+          <option value="us-east-1">Pohjois-Amerikka (us-east-1)</option>
+          <option value="ap-southeast-1">Aasia (ap-southeast-1)</option>
+          <option value="ap-southeast-2">Australia (ap-southeast-2)</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Testit</h2>
+    <div class="row"><button class="btn" id="t1">1. Token ja yhteys</button><span class="res" id="r1"></span></div>
+    <div class="hint">Hakee käyttöoikeustokenin ja kokeilee Property Set -palvelua. Trimble Connect voi kysyä lupaa – hyväksy se.</div>
+    <hr>
+    <div class="row"><button class="btn" id="t2">2. Luo koekirjasto</button><span class="res" id="r2"></span></div>
+    <div class="hint">Vain projektin pääkäyttäjä. Luo kirjaston "Trutec asennuskuittaus (koe)" ja asettaa oikeudet: kaikki projektin jäsenet voivat kuitata.</div>
+    <div class="row" style="margin-top:6px"><button class="btn sec" id="t2b">2b. Näytä kirjasto TC:n ominaisuusnäkymässä (valinnainen)</button><span class="res" id="r2b"></span></div>
+    <hr>
+    <div class="row">
+      <button class="btn ok" id="t3">3. Kuittaa valittu asennetuksi</button>
+      <button class="btn sec" id="t3u">Peru kuittaus</button>
+      <span class="res" id="r3"></span>
+    </div>
+    <div class="hint">Valitse ensin yksi kokoonpano mallista.</div>
+    <hr>
+    <div class="row"><button class="btn" id="t4">4. Lue takaisin + historia</button><span class="res" id="r4"></span></div>
+    <div class="hint">Lukee valitun kappaleen kuittauksen, sen historian ja kaikkien kuittausten määrän.</div>
+  </div>
+
+  <div class="panel">
+    <h2>Loki</h2>
+    <div id="log"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn sec" id="copy">Kopioi loki</button>
+      <button class="btn sec" id="clear">Tyhjennä</button>
+      <button class="btn red" id="cleanup" style="margin-left:auto">Poista koekirjasto</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   Trutec – installation sign-off PoC (Property Set Service)
+   Goal: verify that the Workspace API token works against
+   pset-api, CORS from GitHub Pages, library policy and that a
+   normal project member can write a pset.
+   No tokens or e-mail addresses are written to the log (GDPR).
+   ============================================================ */
+
+const DEF_ID = 'asennus';
+const els = id => document.getElementById(id);
+
+let API = null;
+let project = null;         // { id, name, location }
+let token = null;
+let tokenWaiters = [];
+let members = null;         // Map tiduuid -> display name
+
+/* ---------- logging ---------- */
+function log(msg, kind){
+  const t = new Date().toLocaleTimeString('fi-FI');
+  const line = `[${t}] ${kind==='err'?'✗ ':kind==='ok'?'✓ ':''}${msg}`;
+  const el = els('log'); el.textContent += line + '\n'; el.scrollTop = el.scrollHeight;
+  (kind==='err'?console.warn:console.log)(line);
+}
+function res(id, state, text){ const r=els(id); r.className='res '+state; r.textContent=text||({ok:'OK',fail:'VIRHE',run:'…'}[state]); }
+const short = (s, n=400) => { s = typeof s==='string' ? s : JSON.stringify(s); return s && s.length>n ? s.slice(0,n)+'…' : s; };
+
+/* ---------- region / URLs ---------- */
+function guessRegion(loc){
+  const l = String(loc||'').toLowerCase();
+  if(/eu-west-2|uk|london/.test(l)) return 'eu-west-2';
+  if(/eu|europe/.test(l)) return 'eu-west-1';
+  if(/us|north|america/.test(l)) return 'us-east-1';
+  if(/austral|syd|southeast-2/.test(l)) return 'ap-southeast-2';
+  if(/asia|sing|southeast-1/.test(l)) return 'ap-southeast-1';
+  return null;
+}
+const psetBase = () => `https://pset-api.${els('region').value}.connect.trimble.com/v1`;
+const orgBase  = () => `https://org-api.${els('region').value}.connect.trimble.com/v1`;
+const libId    = () => `trutec-asennus-koe-${project.id}`;
+const linkFor  = guid => `frn:entity:${guid}`;
+
+/* ---------- Workspace API connection ---------- */
+async function connect(){
+  try{
+    API = await TrimbleConnectWorkspace.connect(window.parent, onEvent, 30000);
+    Promise.resolve(API.viewer.setSettings({ assemblySelection:true })).catch(()=>{});
+    const p = await (API.project.getProject ? API.project.getProject() : API.project.getCurrentProject());
+    project = { id:p.id, name:p.name, location:p.location };
+    const g = guessRegion(p.location); if(g) els('region').value = g;
+    els('info').innerHTML = `Projekti: <b>${esc(p.name||'')}</b><br>Projektin tunnus: ${esc(p.id)}<br>Sijainti (TC): ${esc(p.location||'ei tietoa')}`;
+    log(`Yhdistetty. Projekti "${p.name}", sijainti "${p.location}", alue ${els('region').value}`, 'ok');
+  }catch(e){
+    els('info').textContent = 'Yhteyttä ei saatu. Avaa tämä laajennus Trimble Connectin 3D-katselussa.';
+    log('Yhteysvirhe: '+e, 'err');
+  }
+}
+function onEvent(event, args){
+  if(event === 'extension.accessToken'){
+    const t = args && (args.data ?? args);
+    if(isJwt(t)){ token = t; log(`Token vastaanotettu/uusittu tapahtumana (pituus ${t.length})`); tokenWaiters.splice(0).forEach(f=>f(t)); }
+  }
+}
+const isJwt = t => typeof t==='string' && t.split('.').length===3 && t.length>100;
+const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// Requests the access token; result may be the token itself or a status
+// ("pending") with the token arriving later as an 'extension.accessToken' event.
+async function getToken(force){
+  if(token && !force) return token;
+  const r = await API.extension.requestPermission('accesstoken');
+  if(isJwt(r)){ token = r; return token; }
+  log(`requestPermission palautti tilan: "${r}" – odotetaan tokenia (max 60 s)…`);
+  if(r === 'denied') throw new Error('Käyttäjä ei antanut lupaa tokeniin');
+  return await new Promise((resolve, reject)=>{
+    const to = setTimeout(()=>reject(new Error('Tokenia ei saatu 60 s kuluessa')), 60000);
+    tokenWaiters.push(t => { clearTimeout(to); resolve(t); });
+  });
+}
+
+/* ---------- HTTP with retry/backoff and token refresh ---------- */
+async function http(method, url, body, opt={}){
+  let refreshed = false;
+  for(let attempt=0; attempt<5; attempt++){
+    const t = await getToken();
+    let r;
+    try{
+      r = await fetch(url, {
+        method,
+        headers: Object.assign({ 'Authorization':'Bearer '+t, 'Accept':'application/json' },
+                               body!==undefined ? {'Content-Type':'application/json'} : {}, opt.headers||{}),
+        body: body!==undefined ? JSON.stringify(body) : undefined
+      });
+    }catch(e){
+      // Network / CORS failures land here (no status available)
+      if(attempt<2){ await sleep(800*(attempt+1)); continue; }
+      throw Object.assign(new Error('Verkko- tai CORS-virhe: '+e.message), { status:0 });
+    }
+    if(r.status===401 && !refreshed){ refreshed = true; log('401 → uusitaan token'); await getToken(true); attempt--; continue; }
+    if(r.status===429 || r.status>=500){
+      const ra = parseFloat(r.headers.get('Retry-After'));
+      const wait = isFinite(ra) ? ra*1000 : Math.min(8000, 500*2**attempt);
+      log(`${r.status} → yritetään uudelleen ${Math.round(wait)} ms päästä`);
+      await sleep(wait); continue;
+    }
+    const txt = await r.text();
+    let data = null; try{ data = txt ? JSON.parse(txt) : null; }catch(e){ data = txt; }
+    if(!r.ok && !(opt.allow||[]).includes(r.status)){
+      const err = new Error(`${method} ${url.replace(/^https:\/\/[^/]+/,'')} → ${r.status} ${short(data,300)}`);
+      err.status = r.status; err.data = data; throw err;
+    }
+    return { status:r.status, data, etag:r.headers.get('ETag') };
+  }
+  throw new Error('Liian monta uudelleenyritystä');
+}
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
+
+/* ---------- Test 1: token + service reachability ---------- */
+async function test1(){
+  res('r1','run');
+  try{
+    const t = await getToken(true);
+    log(`Token saatu (pituus ${t.length})`, 'ok');
+    const me = await http('GET', psetBase()+'/me');
+    const c = me.data || {};
+    log(`pset-api /me OK. Tunnistettu käyttäjä, projektijäsenyyksiä tokenissa: ${Array.isArray(c.prj)?c.prj.length:(c.prj?'1':'?')}`, 'ok');
+    const inProject = JSON.stringify(c).includes(project.id);
+    log(inProject ? 'Tokenissa näkyy tämä projekti ✓' : 'Huom: tämän projektin tunnusta ei näy /me-vastauksessa (ei välttämättä virhe)');
+    res('r1','ok');
+  }catch(e){ log('Testi 1: '+e.message, 'err'); res('r1','fail'); }
+}
+
+/* ---------- Test 2: create library + definition + policy ---------- */
+function libraryPolicy(){
+  // Same statements Trimble's Workflow Extensions use for project libraries
+  return {
+    version: '2020-04-06',
+    statements: [
+      { effect:'Allow', principal:`project:${project.id}:ADMIN`,
+        action:['pset:GetLibrary*','pset:UpdateLibrary*','pset:CreateDef','pset:GetDef*','pset:ListDefs','pset:UpdateDef','pset:ValidatePSets','pset:Subscribe'],
+        resource:['*'] },
+      { effect:'Allow', principal:{ any:[`project:${project.id}`] },
+        action:['pset:Get*','pset:List*','pset:PutPSet','pset:Subscribe'],
+        resource:'*' }
+    ]
+  };
+}
+function definition(){
+  return {
+    id: DEF_ID,
+    name: 'Asennus',
+    description: 'Kokoonpanon asennuskuittaus (Trutec)',
+    types: [],
+    schema: { props: {
+      asennettu:     { type:'boolean' },
+      asennettuPvm:  { type:'string' }
+    }},
+    i18n: {
+      'fi-FI': { name:'Asennus', props:{ asennettu:'Asennettu', asennettuPvm:'Asennettu pvm' } },
+      'en-US': { name:'Installation', props:{ asennettu:'Installed', asennettuPvm:'Installed date' } },
+      '__prop-order__': { name:'__prop-order__', props:{ asennettu:'0', asennettuPvm:'1' } }
+    }
+  };
+}
+async function test2(){
+  res('r2','run');
+  try{
+    const id = libId();
+    const g = await http('GET', `${psetBase()}/libs/${encodeURIComponent(id)}`, undefined, { allow:[404] });
+    if(g.status===200){
+      log(`Kirjasto on jo olemassa (${id}), versio ${g.data.v}`, 'ok');
+    }else{
+      const c = await http('POST', `${psetBase()}/libs`, {
+        id, name:'Trutec asennuskuittaus (koe)', description:'Koekirjasto asennuskuittauksille',
+        policy: libraryPolicy(), defs:[ definition() ]
+      });
+      log(`Kirjasto luotu: ${c.data.id}`, 'ok');
+    }
+    const d = await http('GET', `${psetBase()}/libs/${encodeURIComponent(id)}/defs/${DEF_ID}`, undefined, { allow:[404] });
+    if(d.status===404){
+      await http('POST', `${psetBase()}/libs/${encodeURIComponent(id)}/defs`, definition());
+      log('Määrittely "asennus" luotu', 'ok');
+    }else log('Määrittely "asennus" OK', 'ok');
+    const p = await http('GET', `${psetBase()}/libs/${encodeURIComponent(id)}/policy`, undefined, { allow:[403] });
+    log(p.status===200 ? `Oikeudet: ${p.data.statements ? p.data.statements.length : '?'} sääntöä` : 'Oikeuksia ei voi lukea tällä tunnuksella (normaalia tavalliselle käyttäjälle)');
+    res('r2','ok');
+  }catch(e){ log('Testi 2: '+e.message, 'err'); res('r2','fail'); }
+}
+
+/* ---------- Test 2b: attach library to the project's discovery tree ---------- */
+async function test2b(){
+  res('r2b','run');
+  try{
+    const forest = encodeURIComponent(`project:${project.id}:data`);
+    const tree = await http('GET', `${orgBase()}/forests/${forest}/trees/ProjectContext`, undefined, { allow:[404,403] });
+    if(tree.status!==200){
+      log(`Projektin ominaisuusnäkymän hakemistoa ei löydy (${tree.status}). Sitä ei luoda tästä kokeesta. Kuittaus toimii silti.`);
+      res('r2b','fail','EI HAKEMISTOA'); return;
+    }
+    const nodeUrl = `${orgBase()}/forests/${forest}/trees/ProjectContext/nodes/PSetLibs`;
+    const node = await http('GET', nodeUrl, undefined, { allow:[404] });
+    if(node.status===404){
+      await http('POST', `${orgBase()}/forests/${forest}/trees/ProjectContext/nodes/`, { id:'PSetLibs' });
+      log('PSetLibs-solmu luotu');
+    }
+    const frn = `frn:lib:${libId()}`;
+    const links = (node.data && node.data.links) || [];
+    if(links.includes(frn)){ log('Kirjasto on jo liitetty projektiin', 'ok'); }
+    else{ await http('PATCH', nodeUrl, { add:[frn] }); log('Kirjasto liitetty projektin ominaisuusnäkymään', 'ok'); }
+    res('r2b','ok');
+  }catch(e){ log('Testi 2b: '+e.message, 'err'); res('r2b','fail'); }
+}
+
+/* ---------- selection → assembly → IFC GUID ---------- */
+function isAssembly(p){ return p && p.class && /ELEMENTASSEMBLY/i.test(String(p.class).replace(/\s/g,'')); }
+function findMark(p){
+  const cands = ['assembly/cast unit mark','assembly mark','assemblymark','assembly_pos','cast unit mark','position','mark'];
+  const flat = []; (p.properties||[]).forEach(ps=>(ps.properties||[]).forEach(x=>flat.push(x)));
+  for(const c of cands){ const h = flat.find(x=>String(x.name).toLowerCase()===c); if(h) return h.value; }
+  return p.name || '';
+}
+async function resolveAssembly(modelId, id){
+  let props;
+  try{ const a = await API.viewer.getObjectProperties(modelId, [id]); props = a && a[0]; }catch(e){}
+  if(!props) return null;
+  if(isAssembly(props)) return { id, props };
+  try{
+    const parents = await API.viewer.getHierarchyParents(modelId, [id], undefined, true);
+    for(const par of (parents||[])){
+      const pid = par && (par.id ?? par.entityId ?? par.runtimeId); if(pid==null) continue;
+      const pa = await API.viewer.getObjectProperties(modelId, [pid]);
+      if(pa && pa[0] && isAssembly(pa[0])) return { id:pid, props:pa[0] };
+    }
+  }catch(e){}
+  return { id, props };
+}
+async function selectedPiece(){
+  const sel = await API.viewer.getSelection();
+  const first = (sel||[]).find(m => m.objectRuntimeIds && m.objectRuntimeIds.length);
+  if(!first) throw new Error('Valitse ensin kokoonpano mallista');
+  const asm = await resolveAssembly(first.modelId, first.objectRuntimeIds[0]);
+  if(!asm) throw new Error('Valitun kappaleen tietoja ei saatu');
+  const g = await API.viewer.convertToObjectIds(first.modelId, [asm.id]);
+  const guid = g && g[0];
+  if(!guid) throw new Error('IFC GUIDia ei saatu valitulle kappaleelle');
+  return { modelId:first.modelId, id:asm.id, guid:String(guid), mark:findMark(asm.props), isAsm:isAssembly(asm.props) };
+}
+const psetUrl = guid => `${psetBase()}/psets/${encodeURIComponent(linkFor(guid))}/${encodeURIComponent(libId())}/${DEF_ID}`;
+
+/* ---------- Test 3: sign off / undo ---------- */
+async function writeInstalled(installed){
+  res('r3','run');
+  try{
+    const pc = await selectedPiece();
+    log(`Valittu: ${pc.mark} (GUID ${pc.guid})${pc.isAsm?'':' – HUOM: ei tunnistettu kokoonpanoksi'}`);
+    const url = psetUrl(pc.guid);
+    const props = { asennettu: installed, asennettuPvm: installed ? new Date().toISOString() : '' };
+    // Try insert-only first; on 412 the pset exists (possibly deleted) → update with current version
+    let r = await http('PATCH', url, { props, v:-1 }, { allow:[412] });
+    if(r.status===412){
+      const cur = await http('GET', url+'?deleted=true');
+      r = await http('PATCH', url, { props, v:cur.data.v }, { allow:[409,412] });
+      if(r.status===409 || r.status===412){
+        log('Joku muu ehti päivittää samaan aikaan – luetaan uudelleen ja yritetään kerran', 'err');
+        const cur2 = await http('GET', url+'?deleted=true');
+        r = await http('PATCH', url, { props, v:cur2.data.v });
+      }
+    }
+    log(`${installed?'Kuitattu asennetuksi':'Kuittaus peruttu'}: ${pc.mark}, versio ${r.data && r.data.v}`, 'ok');
+    res('r3','ok');
+  }catch(e){ log('Testi 3: '+e.message, 'err'); res('r3','fail'); }
+}
+
+/* ---------- Test 4: read back + history + count ---------- */
+async function memberName(sub){
+  if(!members){
+    members = new Map();
+    try{ (await API.project.getMembers()||[]).forEach(m => members.set(m.tiduuid, `${m.firstName||''} ${m.lastName||''}`.trim())); }catch(e){ log('Jäsenlistaa ei saatu: '+e); }
+  }
+  return members.get(sub) || 'tuntematon käyttäjä';
+}
+const fiTime = s => s ? new Date(s).toLocaleString('fi-FI') : '';
+async function test4(){
+  res('r4','run');
+  try{
+    const pc = await selectedPiece();
+    const url = psetUrl(pc.guid);
+    const cur = await http('GET', url, undefined, { allow:[404] });
+    if(cur.status===404) log(`${pc.mark}: ei kuittausta`);
+    else log(`${pc.mark}: asennettu=${cur.data.props.asennettu}, muokannut ${await memberName(cur.data.modifiedBy)} ${fiTime(cur.data.modifiedAt)}, versio ${cur.data.v}`, 'ok');
+    if(cur.status===200){
+      const h = await http('GET', url+'/versions?top=20');
+      const items = (h.data && (h.data.items || h.data)) || [];
+      log(`Historia (${items.length} versiota):`);
+      for(const it of items) log(`   v${it.v}: asennettu=${it.props && it.props.asennettu} – ${await memberName(it.modifiedBy)} ${fiTime(it.modifiedAt)}`);
+    }
+    // Count all sign-offs in the definition (paged)
+    let next = `${psetBase()}/libs/${encodeURIComponent(libId())}/defs/${DEF_ID}/psets?top=500`;
+    let total = 0, installed = 0, pages = 0;
+    while(next && pages < 50){
+      const p = await http('GET', next);
+      (p.data.items||[]).forEach(x => { total++; if(x.props && x.props.asennettu) installed++; });
+      next = nextUrl(p.data.next);
+      pages++;
+    }
+    log(`Koko projektissa: ${installed} asennettu / ${total} kirjausta`, 'ok');
+    res('r4','ok');
+  }catch(e){ log('Testi 4: '+e.message, 'err'); res('r4','fail'); }
+}
+
+// Resolve a paging 'next' link that may be absolute, '/v1/...' or relative to the API root
+function nextUrl(n){
+  if(!n) return null;
+  if(/^https?:/.test(n)) return n;
+  const path = n.replace(/^\/?(v1\/)?/, '');
+  return psetBase() + '/' + path;
+}
+
+/* ---------- cleanup ---------- */
+async function cleanup(){
+  if(!confirm('Poistetaanko koekirjasto ja sen kuittaukset? (Palvelu merkitsee ne poistetuiksi.)')) return;
+  try{
+    const forest = encodeURIComponent(`project:${project.id}:data`);
+    const nodeUrl = `${orgBase()}/forests/${forest}/trees/ProjectContext/nodes/PSetLibs`;
+    const node = await http('GET', nodeUrl, undefined, { allow:[404,403] });
+    if(node.status===200 && (node.data.links||[]).includes(`frn:lib:${libId()}`)){
+      await http('PATCH', nodeUrl, { remove:[`frn:lib:${libId()}`] }); log('Kirjasto irrotettu ominaisuusnäkymästä', 'ok');
+    }
+    await http('DELETE', `${psetBase()}/libs/${encodeURIComponent(libId())}`, undefined, { allow:[404] });
+    log('Koekirjasto poistettu', 'ok');
+  }catch(e){ log('Poisto: '+e.message, 'err'); }
+}
+
+/* ---------- wiring ---------- */
+function guard(fn){ return async () => { if(!API || !project){ log('Ei yhteyttä Trimble Connectiin', 'err'); return; } await fn(); }; }
+els('t1').onclick  = guard(test1);
+els('t2').onclick  = guard(test2);
+els('t2b').onclick = guard(test2b);
+els('t3').onclick  = guard(() => writeInstalled(true));
+els('t3u').onclick = guard(() => writeInstalled(false));
+els('t4').onclick  = guard(test4);
+els('cleanup').onclick = guard(cleanup);
+els('clear').onclick = () => { els('log').textContent = ''; };
+els('copy').onclick = async () => {
+  const txt = `Selain: ${navigator.userAgent}\nIkkuna: ${innerWidth}x${innerHeight}\n\n` + els('log').textContent;
+  try{ await navigator.clipboard.writeText(txt); log('Loki kopioitu leikepöydälle', 'ok'); }
+  catch(e){ const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); log('Loki kopioitu', 'ok'); }
+};
+els('region').onchange = () => log('Alue vaihdettu: '+els('region').value);
+
+connect();
+</script>
+</body>
+</html>
