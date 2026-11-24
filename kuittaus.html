@@ -121,7 +121,7 @@
    metadata (modifiedBy/modifiedAt); only the Trimble ID is stored.
    ===================================================================== */
 
-const VERSION = '1.2';
+const VERSION = '1.3';
 const DEF_ID = 'asennus';
 const POLL_MS = 20000;
 const PALETTE = [
@@ -281,7 +281,7 @@ function onEvent(event, args){
     // Models loaded/unloaded: runtime ids change, rebuild mapping (debounced)
     if(args && args.origin && args.origin.isSelf) return;
     clearTimeout(modelTimer);
-    modelTimer = setTimeout(() => { COLOR.applied.clear(); COLOR.base = null; COLOR.rt.clear(); COLOR.children.clear(); pieceCache.clear(); colorSync(); countAssemblies(); }, 800);
+    modelTimer = setTimeout(() => { COLOR.applied.clear(); COLOR.base = null; rtClear(); COLOR.children.clear(); pieceCache.clear(); colorSync(); countAssemblies(); }, 800);
   }
 }
 
@@ -360,18 +360,30 @@ async function loadedModelIds(){
   try{ const ms = await API.viewer.getModels('loaded'); return (ms || []).map(m => m.id || m.modelId).filter(Boolean); }
   catch(e){ try{ const ms = await API.viewer.getModels(); return (ms || []).map(m => m.id || m.modelId).filter(Boolean); }catch(_){ return []; } }
 }
+// GUID -> runtime ids in loaded models. Concurrent callers share one in-flight lookup
+// (an earlier version stored an empty placeholder, so a parallel caller saw "not in model").
+const RTP = new Map(); let rtGen = 0;
+function rtClear(){ COLOR.rt.clear(); RTP.clear(); rtGen++; }
 async function resolveRuntime(guids){
-  const need = guids.filter(g => !COLOR.rt.has(g));
-  if(!need.length) return;
-  const models = await loadedModelIds();
-  need.forEach(g => COLOR.rt.set(g, []));
-  for(const modelId of models){
-    for(let i = 0; i < need.length; i += 500){
-      const chunk = need.slice(i, i + 500);
-      let r = []; try{ r = await API.viewer.convertToObjectRuntimeIds(modelId, chunk) || []; }catch(e){}
-      chunk.forEach((g, j) => { const id = r[j]; if(id != null && id >= 0) COLOR.rt.get(g).push({ modelId, id }); });
-    }
+  const gen = rtGen;
+  const need = [...new Set(guids)].filter(g => !COLOR.rt.has(g) && !RTP.has(g));
+  if(need.length){
+    const p = (async () => {
+      const models = await loadedModelIds();
+      const found = new Map(need.map(g => [g, []]));
+      for(const modelId of models){
+        for(let i = 0; i < need.length; i += 500){
+          const chunk = need.slice(i, i + 500);
+          let r = []; try{ r = await API.viewer.convertToObjectRuntimeIds(modelId, chunk) || []; }catch(e){}
+          chunk.forEach((g, j) => { const id = r[j]; if(id != null && id >= 0) found.get(g).push({ modelId, id }); });
+        }
+      }
+      if(gen === rtGen) found.forEach((v, g) => COLOR.rt.set(g, v));
+    })().finally(() => need.forEach(g => { if(RTP.get(g) === p) RTP.delete(g); }));
+    need.forEach(g => RTP.set(g, p));
   }
+  const waits = [...new Set(guids.map(g => RTP.get(g)).filter(Boolean))];
+  await Promise.all(waits.map(w => w.catch(() => {})));
 }
 async function expand(modelId, id){
   const k = modelId + '|' + id;
@@ -427,6 +439,7 @@ async function colorApply(){
     for(const g of add){
       const entries = [];
       for(const r of COLOR.rt.get(g) || []) entries.push({ modelId:r.modelId, ids: await expand(r.modelId, r.id) });
+      if(!entries.length) continue;     // not in loaded models (yet) – retried on next sync
       COLOR.applied.set(g, { hex:want.get(g), entries });
       if(!byHex.has(want.get(g))) byHex.set(want.get(g), []);
       byHex.get(want.get(g)).push(...entries);
@@ -653,7 +666,7 @@ els('btnUndo').onclick = () => signOff(false);
 els('showColors').onchange = () => { lsSet('tck:show', els('showColors').checked ? '1' : '0'); renderView(); colorSync(); };
 els('seg').querySelectorAll('button').forEach(b => b.onclick = () => { others = b.dataset.m; lsSet('tck:others', others); renderView(); colorSync(); });
 els('btnRefresh').onclick = async () => {
-  try{ COLOR.rt.clear(); await loadAll(); toast('Päivitetty', 'ok'); }catch(e){ toast('Päivitys epäonnistui: ' + e.message, 'err'); }
+  try{ rtClear(); await loadAll(); toast('Päivitetty', 'ok'); }catch(e){ toast('Päivitys epäonnistui: ' + e.message, 'err'); }
 };
 start();
 </script>
