@@ -35,8 +35,6 @@
   .chips{ display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:8px; font-size:13px; color:var(--mut); }
   .chips span{ display:inline-flex; align-items:center; gap:5px; }
   .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; font-size:13px; color:var(--mut); }
-  .tgl{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; color:var(--txt); }
-  .tgl input{ width:18px; height:18px; }
   .link{ background:none; border:none; color:var(--blue); cursor:pointer; font-size:13px; padding:4px; }
   #toast{ position:fixed; left:12px; right:12px; bottom:12px; padding:12px 14px; border-radius:10px; color:#fff; font-size:14px; font-weight:500;
           background:#2a2f36; box-shadow:0 6px 20px rgba(0,0,0,.2); transform:translateY(calc(100% + 30px)); opacity:0; visibility:hidden;
@@ -44,6 +42,20 @@
   #toast.show{ transform:none; opacity:1; visibility:visible; }
   #toast.ok{ background:var(--ok); } #toast.err{ background:var(--err); }
   .msg{ color:var(--mut); line-height:1.5; }
+  .vrow{ display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer; }
+  .vrow .vt{ font-size:15px; font-weight:600; }
+  .vrow .vs{ font-size:12px; color:var(--mut); margin-top:2px; }
+  .switch{ position:relative; width:52px; height:30px; flex:none; }
+  .switch input{ opacity:0; width:0; height:0; position:absolute; }
+  .switch .knob{ position:absolute; inset:0; background:#c9ced6; border-radius:30px; transition:background .2s; }
+  .switch .knob::after{ content:''; position:absolute; left:3px; top:3px; width:24px; height:24px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .2s; }
+  .switch input:checked + .knob{ background:var(--ok); }
+  .switch input:checked + .knob::after{ transform:translateX(22px); }
+  .seg{ display:flex; margin-top:12px; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button{ flex:1; border:none; background:#fff; padding:9px 4px; font-size:13px; cursor:pointer; color:var(--txt); border-left:1px solid var(--line); }
+  .seg button:first-child{ border-left:none; }
+  .seg button.on{ background:var(--blue); color:#fff; font-weight:600; }
+  .seglbl{ font-size:12px; color:var(--mut); margin-top:12px; }
   .hidden{ display:none !important; }
   .spin{ display:inline-block; width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:sp .8s linear infinite; vertical-align:-2px; }
   @keyframes sp{ to{ transform:rotate(360deg); } }
@@ -61,6 +73,19 @@
     <button class="btn pri hidden" id="btnSetup" style="margin-top:12px">Ota kuittaus käyttöön</button>
   </div>
 
+  <div class="card hidden" id="cardView">
+    <label class="vrow">
+      <div><div class="vt">Näytä asennetut mallissa</div><div class="vs" id="viewSub">Pois päältä: malli alkuperäisenä</div></div>
+      <span class="switch"><input type="checkbox" id="showColors"><span class="knob"></span></span>
+    </label>
+    <div id="otherWrap" class="hidden">
+      <div class="seglbl">Muut osat</div>
+      <div class="seg" id="seg">
+        <button data-m="normal">Normaali</button><button data-m="grey">Harmaa</button><button data-m="ghost">Läpikuultava</button>
+      </div>
+    </div>
+  </div>
+
   <div class="card hidden" id="cardSign">
     <div class="lbl">Valittu</div>
     <div id="selName" class="empty">Valitse kokoonpano mallista</div>
@@ -75,10 +100,10 @@
     <div class="sum"><b id="sumN">0</b><span>kokoonpanoa</span></div>
     <div class="chips" id="chips"></div>
     <div class="row">
-      <label class="tgl"><input type="checkbox" id="showColors" checked> Värit mallissa</label>
+      <span id="updated"></span>
       <button class="link" id="btnRefresh">Päivitä</button>
     </div>
-    <div class="row" style="margin-top:4px"><span id="updated"></span><span id="missing"></span></div>
+    <div class="row" style="margin-top:2px"><span id="missing"></span></div>
   </div>
 </div>
 <div id="toast"></div>
@@ -222,8 +247,12 @@ async function start(){
 
 async function becomeReady(){
   els('cardInfo').classList.add('hidden');
+  els('cardView').classList.remove('hidden');
   els('cardSign').classList.remove('hidden');
   els('cardSum').classList.remove('hidden');
+  const sv = lsGet('tck:show'); els('showColors').checked = sv === null ? true : sv === '1';
+  const om = lsGet('tck:others'); if(OTHERS[om]) others = om;
+  renderView();
   ready = true;
   await loadAll();
   startSelectionWatch();
@@ -238,13 +267,15 @@ function onEvent(event, args){
   }else if(event === 'viewer.onSelectionChanged'){
     readSelection();
   }else if(event === 'viewer.onModelReset'){
-    // The viewer cleared all object states: forget what we coloured and paint again
-    COLOR.applied.clear(); colorSync();
+    // User pressed "Reset model" in TC: respect it and switch the display off
+    if(args && args.origin && args.origin.isSelf) return;
+    COLOR.applied.clear(); COLOR.base = 'normal';
+    if(els('showColors').checked){ els('showColors').checked = false; lsSet('tck:show', '0'); renderView(); }
   }else if(event === 'viewer.onModelStateChanged'){
     // Models loaded/unloaded: runtime ids change, rebuild mapping (debounced)
     if(args && args.origin && args.origin.isSelf) return;
     clearTimeout(modelTimer);
-    modelTimer = setTimeout(() => { COLOR.applied.clear(); COLOR.rt.clear(); COLOR.children.clear(); pieceCache.clear(); colorSync(); }, 800);
+    modelTimer = setTimeout(() => { COLOR.applied.clear(); COLOR.base = null; COLOR.rt.clear(); COLOR.children.clear(); pieceCache.clear(); colorSync(); }, 800);
   }
 }
 
@@ -310,7 +341,14 @@ function loadAll(){
 
 /* ---------------- model colouring ---------------- */
 // rt: guid -> [{modelId, id}] (assembly runtime ids in loaded models); children: modelId|id -> [ids]
-const COLOR = { applied:new Map(), rt:new Map(), children:new Map(), chain:Promise.resolve(), missing:0 };
+// base: what the rest of the model currently is ('normal' | 'grey' | 'ghost' | null = unknown/needs repaint)
+const COLOR = { applied:new Map(), rt:new Map(), children:new Map(), chain:Promise.resolve(), base:null };   // null at start: clear leftovers from an earlier session
+const OTHERS = {
+  normal: null,
+  grey:   { r:208, g:212, b:218, a:255 },
+  ghost:  { r:205, g:210, b:216, a:40 },
+};
+let others = 'grey';
 
 async function loadedModelIds(){
   try{ const ms = await API.viewer.getModels('loaded'); return (ms || []).map(m => m.id || m.modelId).filter(Boolean); }
@@ -352,24 +390,43 @@ async function setState(entries, state){
 async function colorApply(){
   if(!API || !ready) return;
   const show = els('showColors').checked;
-  const want = new Map();     // guid -> hex
-  if(show) PSETS.forEach((p, g) => { if(p.props && p.props.asennettu) want.set(g, (p.props.vari || PALETTE[0].hex).toLowerCase()); });
-  // remove colouring that is no longer wanted
-  const drop = [...COLOR.applied.keys()].filter(g => !want.has(g));
-  if(drop.length){ await setState(drop.flatMap(g => COLOR.applied.get(g).entries), { color:'reset' }); drop.forEach(g => COLOR.applied.delete(g)); }
-  // add new / changed colours
-  const add = [...want.keys()].filter(g => !COLOR.applied.has(g) || COLOR.applied.get(g).hex !== want.get(g));
-  if(!add.length){ updateMissing(want); return; }
-  await resolveRuntime(add);
-  const byHex = new Map();
-  for(const g of add){
-    const entries = [];
-    for(const r of COLOR.rt.get(g) || []) entries.push({ modelId:r.modelId, ids: await expand(r.modelId, r.id) });
-    COLOR.applied.set(g, { hex:want.get(g), entries });
-    if(!byHex.has(want.get(g))) byHex.set(want.get(g), []);
-    byHex.get(want.get(g)).push(...entries);
+  if(!show){
+    // Display off: give the model back exactly as it was (one reset for everything)
+    if(COLOR.applied.size || COLOR.base !== 'normal'){
+      try{ await API.viewer.setObjectState(undefined, { color:'reset' }); }catch(e){ console.warn('reset', e); }
+      COLOR.applied.clear(); COLOR.base = 'normal';
+    }
+    els('missing').textContent = '';
+    return;
   }
-  for(const [hex, entries] of byHex) await setState(entries, { color:Object.assign(hexToRgb(hex), { a:255 }) });
+  // Base layer for the rest of the model; changing it repaints everything
+  if(COLOR.base !== others){
+    try{
+      await API.viewer.setObjectState(undefined, others === 'normal' ? { color:'reset' } : { color:OTHERS[others] });
+    }catch(e){ console.warn('base', e); }
+    COLOR.applied.clear(); COLOR.base = others;
+  }
+  const want = new Map();     // guid -> hex
+  PSETS.forEach((p, g) => { if(p.props && p.props.asennettu) want.set(g, (p.props.vari || PALETTE[0].hex).toLowerCase()); });
+  // pieces no longer signed go back to the base look
+  const drop = [...COLOR.applied.keys()].filter(g => !want.has(g));
+  if(drop.length){
+    await setState(drop.flatMap(g => COLOR.applied.get(g).entries), OTHERS[others] ? { color:OTHERS[others] } : { color:'reset' });
+    drop.forEach(g => COLOR.applied.delete(g));
+  }
+  const add = [...want.keys()].filter(g => !COLOR.applied.has(g) || COLOR.applied.get(g).hex !== want.get(g));
+  if(add.length){
+    await resolveRuntime(add);
+    const byHex = new Map();
+    for(const g of add){
+      const entries = [];
+      for(const r of COLOR.rt.get(g) || []) entries.push({ modelId:r.modelId, ids: await expand(r.modelId, r.id) });
+      COLOR.applied.set(g, { hex:want.get(g), entries });
+      if(!byHex.has(want.get(g))) byHex.set(want.get(g), []);
+      byHex.get(want.get(g)).push(...entries);
+    }
+    for(const [hex, entries] of byHex) await setState(entries, { color:Object.assign(hexToRgb(hex), { a:255 }) });
+  }
   updateMissing(want);
 }
 function updateMissing(want){
@@ -475,6 +532,7 @@ async function signOff(installed){
   btn.innerHTML = label;
   renderSummary();
   if(done.length) await clearSelection();      // selection highlight would hide the new colour
+  if(done.length && installed && !els('showColors').checked){ els('showColors').checked = true; lsSet('tck:show', '1'); renderView(); }
   await colorSync();
   renderSelection();
   const names = done.slice(0, 3).map(p => p.mark).join(', ') + (done.length > 3 ? ` (+${done.length - 3})` : '');
@@ -533,11 +591,19 @@ function renderSummary(){
     : '';
 }
 
+function renderView(){
+  const on = els('showColors').checked;
+  els('otherWrap').classList.toggle('hidden', !on);
+  els('viewSub').textContent = on ? 'Kuitatut näkyvät väreinä' : 'Pois päältä: malli alkuperäisenä';
+  els('seg').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === others));
+}
+
 /* ---------------- wiring ---------------- */
 els('btnSetup').onclick = setup;
 els('btnSign').onclick = () => signOff(true);
 els('btnUndo').onclick = () => signOff(false);
-els('showColors').onchange = () => colorSync();
+els('showColors').onchange = () => { lsSet('tck:show', els('showColors').checked ? '1' : '0'); renderView(); colorSync(); };
+els('seg').querySelectorAll('button').forEach(b => b.onclick = () => { others = b.dataset.m; lsSet('tck:others', others); renderView(); colorSync(); });
 els('btnRefresh').onclick = async () => {
   try{ COLOR.rt.clear(); await loadAll(); toast('Päivitetty', 'ok'); }catch(e){ toast('Päivitys epäonnistui: ' + e.message, 'err'); }
 };
