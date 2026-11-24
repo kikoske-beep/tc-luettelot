@@ -32,6 +32,9 @@
   .btn.pri{ background:var(--blue); color:#fff; }
   .sum{ display:flex; align-items:baseline; gap:8px; }
   .sum b{ font-size:28px; }
+  .bar{ height:10px; background:#e8ebef; border-radius:6px; overflow:hidden; margin-top:10px; }
+  .bar > div{ height:100%; width:0; background:var(--ok); border-radius:6px; transition:width .4s; }
+  .sum .pct{ margin-left:auto; font-size:15px; font-weight:600; color:var(--txt); }
   .chips{ display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:8px; font-size:13px; color:var(--mut); }
   .chips span{ display:inline-flex; align-items:center; gap:5px; }
   .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; font-size:13px; color:var(--mut); }
@@ -97,7 +100,8 @@
 
   <div class="card hidden" id="cardSum">
     <div class="lbl">Asennettu</div>
-    <div class="sum"><b id="sumN">0</b><span>kokoonpanoa</span></div>
+    <div class="sum"><b id="sumN">0</b><span id="sumOf">kokoonpanoa</span><span class="pct" id="sumPct"></span></div>
+    <div class="bar hidden" id="bar"><div id="barFill"></div></div>
     <div class="chips" id="chips"></div>
     <div class="row">
       <span id="updated"></span>
@@ -117,6 +121,7 @@
    metadata (modifiedBy/modifiedAt); only the Trimble ID is stored.
    ===================================================================== */
 
+const VERSION = '1.2';
 const DEF_ID = 'asennus';
 const POLL_MS = 20000;
 const PALETTE = [
@@ -230,7 +235,7 @@ async function start(){
     const p = await (API.project.getProject ? API.project.getProject() : API.project.getCurrentProject());
     project = { id:p.id, name:p.name };
     region = guessRegion(p.location);
-    els('proj').textContent = p.name || '';
+    els('proj').textContent = (p.name || '') + ' · v' + VERSION;
     const saved = lsGet('tck:color:' + project.id);
     if(saved && PALETTE.some(x => x.hex === saved)) color = saved;
     renderSwatches();
@@ -255,6 +260,7 @@ async function becomeReady(){
   renderView();
   ready = true;
   await loadAll();
+  countAssemblies();
   startSelectionWatch();
   setInterval(() => { if(document.visibilityState === 'visible') loadAll().catch(e => console.warn('poll', e)); }, POLL_MS);
 }
@@ -275,7 +281,7 @@ function onEvent(event, args){
     // Models loaded/unloaded: runtime ids change, rebuild mapping (debounced)
     if(args && args.origin && args.origin.isSelf) return;
     clearTimeout(modelTimer);
-    modelTimer = setTimeout(() => { COLOR.applied.clear(); COLOR.base = null; COLOR.rt.clear(); COLOR.children.clear(); pieceCache.clear(); colorSync(); }, 800);
+    modelTimer = setTimeout(() => { COLOR.applied.clear(); COLOR.base = null; COLOR.rt.clear(); COLOR.children.clear(); pieceCache.clear(); colorSync(); countAssemblies(); }, 800);
   }
 }
 
@@ -582,9 +588,51 @@ async function renderSelection(){
   }
   els('btnUndo').textContent = signed.length > 1 ? `Peru kuittaus (${signed.length})` : 'Peru kuittaus';
 }
-function renderSummary(){
-  const counts = new Map(); let total = 0;
-  PSETS.forEach(p => { if(p.props && p.props.asennettu){ total++; const h = (p.props.vari || PALETTE[0].hex).toLowerCase(); counts.set(h, (counts.get(h) || 0) + 1); } });
+/* ---------------- totals ---------------- */
+// TOTAL.count = number of assemblies in loaded models (null = unknown)
+const TOTAL = { count:null, seq:0 };
+async function countAssemblies(){
+  if(!API) return;
+  const my = ++TOTAL.seq;
+  const count = res => res.reduce((n, m) => n + (m.objects || []).length, 0);
+  let res = null;
+  // 1) let the viewer filter by class (spelling of the class name varies)
+  for(const cls of ['IFCELEMENTASSEMBLY', 'IfcElementAssembly']){
+    try{ const r = await API.viewer.getObjects({ parameter:{ class:cls } }); if(r && count(r) > 0){ res = r; break; } }catch(e){}
+  }
+  // 2) fallback: all objects, filter by class ourselves
+  if(!res){
+    try{
+      const all = await API.viewer.getObjects();
+      if(all && all.some(m => (m.objects || []).some(o => o.class)))
+        res = all.map(m => ({ modelId:m.modelId, objects:(m.objects || []).filter(isAssembly) }));
+    }catch(e){}
+  }
+  if(my !== TOTAL.seq) return;
+  TOTAL.count = res ? count(res) : null;
+  renderSummary();
+}
+let sumSeq = 0;
+async function renderSummary(){
+  const my = ++sumSeq;
+  const counts = new Map(); const signed = [];
+  PSETS.forEach((p, g) => { if(p.props && p.props.asennettu){ signed.push(g); const h = (p.props.vari || PALETTE[0].hex).toLowerCase(); counts.set(h, (counts.get(h) || 0) + 1); } });
+  let total = signed.length;
+  if(TOTAL.count){
+    // count only sign-offs whose assembly is in the loaded models, so n/N stays consistent
+    try{ await resolveRuntime(signed); }catch(e){}
+    if(my !== sumSeq) return;
+    total = signed.filter(g => (COLOR.rt.get(g) || []).length).length;
+    const pct = Math.min(100, Math.round(100 * total / TOTAL.count));
+    els('sumOf').textContent = `/ ${TOTAL.count} kokoonpanoa`;
+    els('sumPct').textContent = pct + ' %';
+    els('barFill').style.width = pct + '%';
+    els('bar').classList.remove('hidden');
+  }else{
+    els('sumOf').textContent = 'kokoonpanoa';
+    els('sumPct').textContent = '';
+    els('bar').classList.add('hidden');
+  }
   els('sumN').textContent = total;
   els('chips').innerHTML = counts.size > 1 || (counts.size === 1 && !counts.has(PALETTE[0].hex))
     ? [...counts].sort((a, b) => b[1] - a[1]).map(([h, c]) => `<span><span class="dot" style="background:${esc(h)}"></span>${c}</span>`).join('')
