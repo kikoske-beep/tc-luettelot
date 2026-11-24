@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trutec – Asennuskuittaus</title>
+<script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<style>
+  :root{ --blue:#005f9e; --line:#e3e6eb; --bg:#f4f5f7; --txt:#1c2126; --mut:#69717c; --ok:#1a7f37; --err:#c0392b; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; }
+  body{ font-family:"Segoe UI",system-ui,-apple-system,sans-serif; color:var(--txt); background:var(--bg); font-size:14px; -webkit-tap-highlight-color:transparent; }
+  header{ background:var(--blue); color:#fff; padding:12px 14px; }
+  header .t{ font-weight:600; font-size:16px; }
+  header .p{ font-size:12px; opacity:.85; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .wrap{ padding:12px; display:flex; flex-direction:column; gap:12px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; }
+  .lbl{ font-size:11px; font-weight:600; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+  #selName{ font-size:20px; font-weight:600; line-height:1.25; word-break:break-word; }
+  #selName.empty{ font-size:15px; font-weight:400; color:var(--mut); }
+  #selState{ font-size:13px; color:var(--mut); margin-top:6px; line-height:1.45; }
+  #selState .dot{ margin-right:6px; vertical-align:-1px; }
+  .dot{ width:12px; height:12px; border-radius:50%; display:inline-block; flex:none; border:1px solid rgba(0,0,0,.15); }
+  .swatches{ display:flex; flex-wrap:wrap; gap:10px; margin:14px 0 4px; }
+  .sw{ width:34px; height:34px; border-radius:50%; border:none; cursor:pointer; position:relative; box-shadow:inset 0 0 0 1px rgba(0,0,0,.12); }
+  .sw.on{ box-shadow:0 0 0 3px #fff, 0 0 0 5px var(--txt); }
+  .btn{ width:100%; border:none; border-radius:10px; padding:14px; font-size:16px; font-weight:600; cursor:pointer; min-height:52px; transition:filter .15s, opacity .15s; }
+  .btn:active{ filter:brightness(.92); }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+  #btnSign{ margin-top:12px; color:#fff; }
+  #btnUndo{ margin-top:8px; background:transparent; color:var(--err); border:1px solid #e7c6c2; font-size:14px; min-height:44px; padding:10px; }
+  .btn.pri{ background:var(--blue); color:#fff; }
+  .sum{ display:flex; align-items:baseline; gap:8px; }
+  .sum b{ font-size:28px; }
+  .chips{ display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:8px; font-size:13px; color:var(--mut); }
+  .chips span{ display:inline-flex; align-items:center; gap:5px; }
+  .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; font-size:13px; color:var(--mut); }
+  .tgl{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; color:var(--txt); }
+  .tgl input{ width:18px; height:18px; }
+  .link{ background:none; border:none; color:var(--blue); cursor:pointer; font-size:13px; padding:4px; }
+  #toast{ position:fixed; left:12px; right:12px; bottom:12px; padding:12px 14px; border-radius:10px; color:#fff; font-size:14px; font-weight:500;
+          background:#2a2f36; box-shadow:0 6px 20px rgba(0,0,0,.2); transform:translateY(calc(100% + 30px)); opacity:0; visibility:hidden;
+          transition:transform .25s, opacity .25s, visibility .25s; z-index:10; }
+  #toast.show{ transform:none; opacity:1; visibility:visible; }
+  #toast.ok{ background:var(--ok); } #toast.err{ background:var(--err); }
+  .msg{ color:var(--mut); line-height:1.5; }
+  .hidden{ display:none !important; }
+  .spin{ display:inline-block; width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:sp .8s linear infinite; vertical-align:-2px; }
+  @keyframes sp{ to{ transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <div class="t">Asennuskuittaus</div>
+  <div class="p" id="proj">Yhdistetään…</div>
+</header>
+
+<div class="wrap">
+  <!-- Shown until the service is ready -->
+  <div class="card" id="cardInfo"><div class="msg" id="infoMsg"><span class="spin"></span> Ladataan…</div>
+    <button class="btn pri hidden" id="btnSetup" style="margin-top:12px">Ota kuittaus käyttöön</button>
+  </div>
+
+  <div class="card hidden" id="cardSign">
+    <div class="lbl">Valittu</div>
+    <div id="selName" class="empty">Valitse kokoonpano mallista</div>
+    <div id="selState"></div>
+    <div class="swatches" id="swatches"></div>
+    <button class="btn" id="btnSign" disabled>✓ Kuittaa asennetuksi</button>
+    <button class="btn hidden" id="btnUndo">Peru kuittaus</button>
+  </div>
+
+  <div class="card hidden" id="cardSum">
+    <div class="lbl">Asennettu</div>
+    <div class="sum"><b id="sumN">0</b><span>kokoonpanoa</span></div>
+    <div class="chips" id="chips"></div>
+    <div class="row">
+      <label class="tgl"><input type="checkbox" id="showColors" checked> Värit mallissa</label>
+      <button class="link" id="btnRefresh">Päivitä</button>
+    </div>
+    <div class="row" style="margin-top:4px"><span id="updated"></span><span id="missing"></span></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   Trutec – installation sign-off (Trimble Connect 3D viewer extension)
+   Storage: Trimble Connect Property Set Service, one pset per assembly,
+   linked with frn:entity:<IFC GUID>. Signer/time come from pset
+   metadata (modifiedBy/modifiedAt); only the Trimble ID is stored.
+   ===================================================================== */
+
+const DEF_ID = 'asennus';
+const POLL_MS = 20000;
+const PALETTE = [
+  { hex:'#2e9e44', name:'Vihreä' },  { hex:'#1f6fd1', name:'Sininen' },
+  { hex:'#f08c00', name:'Oranssi' }, { hex:'#8e44ad', name:'Violetti' },
+  { hex:'#0fb5ae', name:'Turkoosi' },{ hex:'#f5c400', name:'Keltainen' },
+  { hex:'#e84393', name:'Pinkki' },  { hex:'#d63031', name:'Punainen' },
+];
+const els = id => document.getElementById(id);
+
+let API = null, project = null, token = null, tokenWaiters = [];
+let region = 'eu-west-1';
+let color = PALETTE[0].hex;
+const PSETS = new Map();     // guid -> pset (current state from service)
+let members = null;          // tiduuid -> name
+let selection = [];          // [{ modelId, id, guid, mark }]
+let ready = false;
+
+/* ---------------- small helpers ---------------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const isJwt = t => typeof t === 'string' && t.split('.').length === 3 && t.length > 100;
+const hexToRgb = h => { const n = parseInt(h.slice(1), 16); return { r:(n>>16)&255, g:(n>>8)&255, b:n&255 }; };
+const lightText = h => { const { r, g, b } = hexToRgb(h); return (r*299 + g*587 + b*114)/1000 < 160; };
+const fiTime = s => { if(!s) return ''; const d = new Date(s); return d.toLocaleDateString('fi-FI',{day:'numeric',month:'numeric'}) + ' klo ' + d.toLocaleTimeString('fi-FI',{hour:'2-digit',minute:'2-digit'}); };
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+
+let toastTimer = null;
+function toast(msg, kind){
+  const t = els('toast'); t.textContent = msg; t.className = 'show ' + (kind || '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', kind === 'err' ? 6000 : 2500);
+}
+function info(html, showSetup){
+  els('cardInfo').classList.remove('hidden');
+  els('infoMsg').innerHTML = html;
+  els('btnSetup').classList.toggle('hidden', !showSetup);
+}
+
+/* ---------------- service endpoints ---------------- */
+function guessRegion(loc){
+  const l = String(loc || '').toLowerCase();
+  if(/eu-west-2|uk|london/.test(l)) return 'eu-west-2';
+  if(/eu|europe/.test(l)) return 'eu-west-1';
+  if(/us|north|america/.test(l)) return 'us-east-1';
+  if(/austral|syd|southeast-2/.test(l)) return 'ap-southeast-2';
+  if(/asia|sing|southeast-1/.test(l)) return 'ap-southeast-1';
+  return 'eu-west-1';
+}
+const psetBase = () => `https://pset-api.${region}.connect.trimble.com/v1`;
+const orgBase  = () => `https://org-api.${region}.connect.trimble.com/v1`;
+const libId    = () => `trutec-asennus-${project.id}`;
+const linkOf   = guid => `frn:entity:${guid}`;
+const guidOf   = link => String(link).replace(/^frn:entity:/, '');
+const psetUrl  = guid => `${psetBase()}/psets/${encodeURIComponent(linkOf(guid))}/${encodeURIComponent(libId())}/${DEF_ID}`;
+function nextUrl(n){
+  if(!n) return null;
+  if(/^https?:/.test(n)) return n;
+  return psetBase() + '/' + n.replace(/^\/?(v1\/)?/, '');
+}
+
+/* ---------------- token ---------------- */
+async function getToken(force){
+  if(token && !force) return token;
+  const r = await API.extension.requestPermission('accesstoken');
+  if(isJwt(r)){ token = r; return token; }
+  if(String(r).toLowerCase() === 'denied') throw new Error('Käyttöoikeutta ei myönnetty');
+  return await new Promise((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error('Kirjautumistietoja ei saatu')), 60000);
+    tokenWaiters.push(t => { clearTimeout(to); resolve(t); });
+  });
+}
+
+/* ---------------- HTTP: retry + backoff + token refresh ---------------- */
+async function http(method, url, body, opt = {}){
+  let refreshed = false;
+  for(let attempt = 0; attempt < 5; attempt++){
+    const t = await getToken();
+    let r;
+    try{
+      r = await fetch(url, { method,
+        headers: Object.assign({ Authorization:'Bearer ' + t, Accept:'application/json' }, body !== undefined ? { 'Content-Type':'application/json' } : {}),
+        body: body !== undefined ? JSON.stringify(body) : undefined });
+    }catch(e){
+      if(attempt < 3){ await sleep(1000 * (attempt + 1)); continue; }
+      throw Object.assign(new Error('Ei verkkoyhteyttä'), { status:0 });
+    }
+    if(r.status === 401 && !refreshed){ refreshed = true; await getToken(true); attempt--; continue; }
+    if(r.status === 429 || r.status >= 500){
+      const ra = parseFloat(r.headers.get('Retry-After'));
+      await sleep(isFinite(ra) ? ra * 1000 : Math.min(8000, 500 * 2 ** attempt)); continue;
+    }
+    const txt = await r.text();
+    let data = null; try{ data = txt ? JSON.parse(txt) : null; }catch(e){ data = txt; }
+    if(!r.ok && !(opt.allow || []).includes(r.status)){
+      console.warn(method, url, r.status, data);
+      throw Object.assign(new Error(r.status === 403 ? 'Ei oikeutta' : `Palvelinvirhe ${r.status}`), { status:r.status, data });
+    }
+    return { status:r.status, data };
+  }
+  throw new Error('Palvelu ei vastaa, yritä hetken päästä uudelleen');
+}
+
+/* ---------------- startup ---------------- */
+async function start(){
+  try{
+    API = await TrimbleConnectWorkspace.connect(window.parent, onEvent, 30000);
+  }catch(e){ info('Avaa laajennus Trimble Connectin 3D-katselussa.'); return; }
+  try{
+    Promise.resolve(API.viewer.setSettings({ assemblySelection:true })).catch(() => {});
+    const p = await (API.project.getProject ? API.project.getProject() : API.project.getCurrentProject());
+    project = { id:p.id, name:p.name };
+    region = guessRegion(p.location);
+    els('proj').textContent = p.name || '';
+    const saved = lsGet('tck:color:' + project.id);
+    if(saved && PALETTE.some(x => x.hex === saved)) color = saved;
+    renderSwatches();
+    await getToken();
+    const lib = await http('GET', `${psetBase()}/libs/${encodeURIComponent(libId())}`, undefined, { allow:[404, 403] });
+    if(lib.status === 404){ info('Asennuskuittaus ei ole vielä käytössä tässä projektissa.<br>Projektin pääkäyttäjä voi ottaa sen käyttöön.', true); return; }
+    if(lib.status === 403){ info('Sinulla ei ole oikeutta asennuskuittauksiin tässä projektissa.'); return; }
+    await becomeReady();
+  }catch(e){
+    console.warn(e);
+    info('Käynnistys epäonnistui: ' + esc(e.message) + '<br><button class="link" onclick="location.reload()">Yritä uudelleen</button>');
+  }
+}
+
+async function becomeReady(){
+  els('cardInfo').classList.add('hidden');
+  els('cardSign').classList.remove('hidden');
+  els('cardSum').classList.remove('hidden');
+  ready = true;
+  await loadAll();
+  startSelectionWatch();
+  setInterval(() => { if(document.visibilityState === 'visible') loadAll().catch(e => console.warn('poll', e)); }, POLL_MS);
+}
+
+let modelTimer = null;
+function onEvent(event, args){
+  if(event === 'extension.accessToken'){
+    const t = args && (args.data ?? args);
+    if(isJwt(t)){ token = t; tokenWaiters.splice(0).forEach(f => f(t)); }
+  }else if(event === 'viewer.onSelectionChanged'){
+    readSelection();
+  }else if(event === 'viewer.onModelReset'){
+    // The viewer cleared all object states: forget what we coloured and paint again
+    COLOR.applied.clear(); colorSync();
+  }else if(event === 'viewer.onModelStateChanged'){
+    // Models loaded/unloaded: runtime ids change, rebuild mapping (debounced)
+    if(args && args.origin && args.origin.isSelf) return;
+    clearTimeout(modelTimer);
+    modelTimer = setTimeout(() => { COLOR.applied.clear(); COLOR.rt.clear(); COLOR.children.clear(); pieceCache.clear(); colorSync(); }, 800);
+  }
+}
+
+/* ---------------- one-time setup (project admin) ---------------- */
+function libraryPolicy(){
+  // Same statements Trimble Workflow Extensions use: admins manage, all members can sign off
+  return { version:'2020-04-06', statements:[
+    { effect:'Allow', principal:`project:${project.id}:ADMIN`,
+      action:['pset:GetLibrary*','pset:UpdateLibrary*','pset:CreateDef','pset:GetDef*','pset:ListDefs','pset:UpdateDef','pset:ValidatePSets','pset:Subscribe'], resource:['*'] },
+    { effect:'Allow', principal:{ any:[`project:${project.id}`] },
+      action:['pset:Get*','pset:List*','pset:PutPSet','pset:Subscribe'], resource:'*' }
+  ]};
+}
+function definition(){
+  return { id:DEF_ID, name:'Asennus', description:'Kokoonpanon asennuskuittaus (Trutec)', types:[],
+    schema:{ props:{ asennettu:{ type:'boolean' }, asennettuPvm:{ type:'string' }, vari:{ type:'string' } } },
+    i18n:{
+      'fi-FI':{ name:'Asennus', props:{ asennettu:'Asennettu', asennettuPvm:'Asennettu pvm', vari:'Väri' } },
+      'en-US':{ name:'Installation', props:{ asennettu:'Installed', asennettuPvm:'Installed date', vari:'Colour' } },
+      '__prop-order__':{ name:'__prop-order__', props:{ asennettu:'0', asennettuPvm:'1', vari:'2' } } } };
+}
+async function setup(){
+  const b = els('btnSetup'); b.disabled = true; b.innerHTML = '<span class="spin"></span> Otetaan käyttöön…';
+  try{
+    await http('POST', `${psetBase()}/libs`, { id:libId(), name:'Trutec asennuskuittaus', description:'Kokoonpanojen asennuskuittaukset', policy:libraryPolicy(), defs:[definition()] });
+    await attachToProjectView().catch(e => console.warn('discovery attach', e));   // optional: show in TC property panel
+    toast('Asennuskuittaus otettu käyttöön', 'ok');
+    await becomeReady();
+  }catch(e){
+    b.disabled = false; b.textContent = 'Ota kuittaus käyttöön';
+    toast(e.status === 403 ? 'Vain projektin pääkäyttäjä voi ottaa kuittauksen käyttöön' : 'Käyttöönotto epäonnistui: ' + e.message, 'err');
+  }
+}
+async function attachToProjectView(){
+  const forest = encodeURIComponent(`project:${project.id}:data`);
+  const tree = await http('GET', `${orgBase()}/forests/${forest}/trees/ProjectContext`, undefined, { allow:[404, 403] });
+  if(tree.status !== 200) return;    // project has no property set view yet – not created from here
+  const nodeUrl = `${orgBase()}/forests/${forest}/trees/ProjectContext/nodes/PSetLibs`;
+  const node = await http('GET', nodeUrl, undefined, { allow:[404] });
+  if(node.status === 404) await http('POST', `${orgBase()}/forests/${forest}/trees/ProjectContext/nodes/`, { id:'PSetLibs' });
+  const frn = `frn:lib:${libId()}`;
+  if(!((node.data && node.data.links) || []).includes(frn)) await http('PATCH', nodeUrl, { add:[frn] });
+}
+
+/* ---------------- load all sign-offs (paged) ---------------- */
+let loading = null;
+function loadAll(){
+  if(loading) return loading;
+  loading = (async () => {
+    const fresh = new Map();
+    let next = `${psetBase()}/libs/${encodeURIComponent(libId())}/defs/${DEF_ID}/psets?top=500`;
+    for(let pages = 0; next && pages < 200; pages++){
+      const p = await http('GET', next);
+      (p.data.items || []).forEach(x => fresh.set(guidOf(x.link), x));
+      next = nextUrl(p.data.next);
+    }
+    PSETS.clear(); fresh.forEach((v, k) => PSETS.set(k, v));
+    els('updated').textContent = 'Päivitetty ' + new Date().toLocaleTimeString('fi-FI', { hour:'2-digit', minute:'2-digit' });
+    renderSummary(); renderSelection(); colorSync();
+  })().finally(() => { loading = null; });
+  return loading;
+}
+
+/* ---------------- model colouring ---------------- */
+// rt: guid -> [{modelId, id}] (assembly runtime ids in loaded models); children: modelId|id -> [ids]
+const COLOR = { applied:new Map(), rt:new Map(), children:new Map(), chain:Promise.resolve(), missing:0 };
+
+async function loadedModelIds(){
+  try{ const ms = await API.viewer.getModels('loaded'); return (ms || []).map(m => m.id || m.modelId).filter(Boolean); }
+  catch(e){ try{ const ms = await API.viewer.getModels(); return (ms || []).map(m => m.id || m.modelId).filter(Boolean); }catch(_){ return []; } }
+}
+async function resolveRuntime(guids){
+  const need = guids.filter(g => !COLOR.rt.has(g));
+  if(!need.length) return;
+  const models = await loadedModelIds();
+  need.forEach(g => COLOR.rt.set(g, []));
+  for(const modelId of models){
+    for(let i = 0; i < need.length; i += 500){
+      const chunk = need.slice(i, i + 500);
+      let r = []; try{ r = await API.viewer.convertToObjectRuntimeIds(modelId, chunk) || []; }catch(e){}
+      chunk.forEach((g, j) => { const id = r[j]; if(id != null && id >= 0) COLOR.rt.get(g).push({ modelId, id }); });
+    }
+  }
+}
+async function expand(modelId, id){
+  const k = modelId + '|' + id;
+  if(COLOR.children.has(k)) return COLOR.children.get(k);
+  const ids = [id];
+  try{
+    const ch = await API.viewer.getHierarchyChildren(modelId, [id], undefined, true);
+    (ch || []).forEach(c => { const cid = c && (c.id ?? c.entityId ?? c.runtimeId); if(cid != null && cid !== id) ids.push(cid); });
+  }catch(e){}
+  COLOR.children.set(k, ids);
+  return ids;
+}
+async function setState(entries, state){
+  const byModel = {};
+  entries.forEach(e => (byModel[e.modelId] ??= []).push(...e.ids));
+  for(const [modelId, ids] of Object.entries(byModel))
+    for(let i = 0; i < ids.length; i += 5000){
+      try{ await API.viewer.setObjectState({ modelObjectIds:[{ modelId, objectRuntimeIds:ids.slice(i, i + 5000) }] }, state); }
+      catch(e){ console.warn('setObjectState', e); }
+    }
+}
+async function colorApply(){
+  if(!API || !ready) return;
+  const show = els('showColors').checked;
+  const want = new Map();     // guid -> hex
+  if(show) PSETS.forEach((p, g) => { if(p.props && p.props.asennettu) want.set(g, (p.props.vari || PALETTE[0].hex).toLowerCase()); });
+  // remove colouring that is no longer wanted
+  const drop = [...COLOR.applied.keys()].filter(g => !want.has(g));
+  if(drop.length){ await setState(drop.flatMap(g => COLOR.applied.get(g).entries), { color:'reset' }); drop.forEach(g => COLOR.applied.delete(g)); }
+  // add new / changed colours
+  const add = [...want.keys()].filter(g => !COLOR.applied.has(g) || COLOR.applied.get(g).hex !== want.get(g));
+  if(!add.length){ updateMissing(want); return; }
+  await resolveRuntime(add);
+  const byHex = new Map();
+  for(const g of add){
+    const entries = [];
+    for(const r of COLOR.rt.get(g) || []) entries.push({ modelId:r.modelId, ids: await expand(r.modelId, r.id) });
+    COLOR.applied.set(g, { hex:want.get(g), entries });
+    if(!byHex.has(want.get(g))) byHex.set(want.get(g), []);
+    byHex.get(want.get(g)).push(...entries);
+  }
+  for(const [hex, entries] of byHex) await setState(entries, { color:Object.assign(hexToRgb(hex), { a:255 }) });
+  updateMissing(want);
+}
+function updateMissing(want){
+  let miss = 0; want.forEach((_, g) => { const r = COLOR.rt.get(g); if(r && !r.length) miss++; });
+  els('missing').textContent = miss ? `${miss} ei ladatuissa malleissa` : '';
+}
+function colorSync(){ COLOR.chain = COLOR.chain.then(colorApply).catch(e => console.warn('colour', e)); return COLOR.chain; }
+
+/* ---------------- selection ---------------- */
+function isAssembly(p){ return p && p.class && /ELEMENTASSEMBLY/i.test(String(p.class).replace(/\s/g, '')); }
+function findMark(p){
+  const cands = ['assembly/cast unit mark','assembly mark','assemblymark','assembly_pos','cast unit mark','position','mark'];
+  const flat = []; (p.properties || []).forEach(ps => (ps.properties || []).forEach(x => flat.push(x)));
+  for(const c of cands){ const h = flat.find(x => String(x.name).toLowerCase() === c); if(h && h.value !== '' && h.value != null) return String(h.value); }
+  return p.name || '?';
+}
+const pieceCache = new Map();   // modelId|runtimeId -> piece
+async function resolvePiece(modelId, id){
+  const k = modelId + '|' + id;
+  if(pieceCache.has(k)) return pieceCache.get(k);
+  let asmId = id, props = null;
+  try{ const a = await API.viewer.getObjectProperties(modelId, [id]); props = a && a[0]; }catch(e){}
+  if(props && !isAssembly(props)){
+    try{
+      const parents = await API.viewer.getHierarchyParents(modelId, [id], undefined, true);
+      for(const par of (parents || [])){
+        const pid = par && (par.id ?? par.entityId ?? par.runtimeId); if(pid == null) continue;
+        const pa = await API.viewer.getObjectProperties(modelId, [pid]);
+        if(pa && pa[0] && isAssembly(pa[0])){ asmId = pid; props = pa[0]; break; }
+      }
+    }catch(e){}
+  }
+  let guid = null;
+  try{ const g = await API.viewer.convertToObjectIds(modelId, [asmId]); guid = g && g[0] ? String(g[0]) : null; }catch(e){}
+  const piece = guid ? { modelId, id:asmId, guid, mark: props ? findMark(props) : '?' } : null;
+  pieceCache.set(k, piece);
+  return piece;
+}
+function normalizeSelection(sel){
+  return (Array.isArray(sel) ? sel : sel ? [sel] : []).map(s => ({
+    modelId: s.modelId || s.modelID,
+    ids: (s.objectRuntimeIds || s.runtimeIds || []).map(x => typeof x === 'object' ? x.id : x)
+  })).filter(m => m.modelId && m.ids.length);
+}
+let selKey = '', selSeq = 0;
+async function readSelection(){
+  if(!API || !ready) return;
+  let sel = null; try{ sel = await API.viewer.getSelection(); }catch(e){}
+  const norm = normalizeSelection(sel);
+  const key = norm.map(m => m.modelId + ':' + m.ids.join(',')).join(';');
+  if(key === selKey) return;
+  selKey = key; const my = ++selSeq;
+  if(!norm.length){ selection = []; renderSelection(); return; }
+  els('selName').className = ''; els('selName').innerHTML = '<span class="spin"></span>';
+  const seen = new Set(), out = [];
+  const all = norm.flatMap(m => m.ids.slice(0, 2000).map(id => [m.modelId, id]));
+  for(let i = 0; i < all.length; i += 8){
+    const res = await Promise.all(all.slice(i, i + 8).map(([m, id]) => resolvePiece(m, id)));
+    if(my !== selSeq) return;     // selection changed meanwhile
+    res.forEach(p => { if(p && !seen.has(p.guid)){ seen.add(p.guid); out.push(p); } });
+  }
+  selection = out; renderSelection();
+}
+function startSelectionWatch(){ readSelection(); setInterval(readSelection, 700); }
+
+/* ---------------- sign off / undo ---------------- */
+async function writeOne(guid, props){
+  const url = psetUrl(guid);
+  let r = await http('PATCH', url, { props, v:-1 }, { allow:[412] });   // insert-only
+  for(let i = 0; r.status === 412 && i < 3; i++){                          // exists → update latest version
+    const cur = await http('GET', url + '?deleted=true');
+    r = await http('PATCH', url, { props, v:cur.data.v }, { allow:[412, 409] });
+  }
+  if(r.status !== 200 && r.status !== 201) throw new Error('Versioristiriita');
+  return r.data;
+}
+async function writeMany(pieces, propsFor){
+  const done = [], failed = [];
+  for(let i = 0; i < pieces.length; i += 4){
+    await Promise.all(pieces.slice(i, i + 4).map(async p => {
+      const props = propsFor(p);
+      try{ const d = await writeOne(p.guid, props); PSETS.set(p.guid, d || { link:linkOf(p.guid), props, modifiedAt:new Date().toISOString() }); done.push(p); }
+      catch(e){ console.warn('write', p.mark, e); failed.push({ p, e }); }
+    }));
+  }
+  return { done, failed };
+}
+async function clearSelection(){ try{ await API.viewer.setSelection({ modelObjectIds:[] }, 'set'); }catch(e){} }
+async function signOff(installed){
+  const pieces = selection.slice();
+  if(!pieces.length) return;
+  const btn = installed ? els('btnSign') : els('btnUndo');
+  const label = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  const now = new Date().toISOString();
+  const recolor = installed && pieces.every(p => isSigned(p.guid));
+  // Already signed pieces keep their original installation date; only the colour changes
+  const propsFor = p => !installed ? { asennettu:false, asennettuPvm:'', vari:'' }
+    : { asennettu:true, asennettuPvm: (isSigned(p.guid) && PSETS.get(p.guid).props.asennettuPvm) || now, vari:color };
+  const targets = installed ? pieces.filter(p => !isSigned(p.guid) || (PSETS.get(p.guid).props.vari || '').toLowerCase() !== color.toLowerCase())
+                            : pieces.filter(p => isSigned(p.guid));
+  if(!targets.length){ btn.innerHTML = label; btn.disabled = false; toast('Valitut on jo kuitattu tällä värillä'); return; }
+  const { done, failed } = await writeMany(targets, propsFor);
+  btn.innerHTML = label;
+  renderSummary();
+  if(done.length) await clearSelection();      // selection highlight would hide the new colour
+  await colorSync();
+  renderSelection();
+  const names = done.slice(0, 3).map(p => p.mark).join(', ') + (done.length > 3 ? ` (+${done.length - 3})` : '');
+  if(!failed.length) toast(!installed ? `${names}: kuittaus peruttu` : recolor ? `${names}: väri vaihdettu` : `✓ ${names} kuitattu`, 'ok');
+  else{
+    const why = failed[0].e.status === 403 ? 'ei oikeutta' : failed[0].e.message;
+    toast(`${done.length} onnistui, ${failed.length} epäonnistui (${why})`, 'err');
+  }
+}
+
+/* ---------------- rendering ---------------- */
+const isSigned = g => { const p = PSETS.get(g); return !!(p && p.props && p.props.asennettu); };
+async function memberName(sub){
+  if(!members){
+    members = new Map();
+    try{ (await API.project.getMembers() || []).forEach(m => members.set(m.tiduuid, `${m.firstName || ''} ${m.lastName || ''}`.trim())); }catch(e){}
+  }
+  return members.get(sub) || '';
+}
+function renderSwatches(){
+  els('swatches').innerHTML = PALETTE.map(p =>
+    `<button class="sw${p.hex === color ? ' on' : ''}" style="background:${p.hex}" title="${p.name}" aria-label="${p.name}" data-hex="${p.hex}"></button>`).join('');
+  els('swatches').querySelectorAll('.sw').forEach(b => b.onclick = () => { color = b.dataset.hex; lsSet('tck:color:' + project.id, color); renderSwatches(); });
+  const btn = els('btnSign'); btn.style.background = color; btn.style.color = lightText(color) ? '#fff' : '#1c2126';
+}
+let renderSeq = 0;
+async function renderSelection(){
+  const my = ++renderSeq;
+  const n = selection.length, signed = selection.filter(p => isSigned(p.guid));
+  const name = els('selName'), st = els('selState');
+  els('btnSign').disabled = !n;
+  els('btnSign').textContent = n && signed.length === n ? 'Vaihda väri' : '✓ Kuittaa asennetuksi';
+  els('btnUndo').classList.toggle('hidden', !signed.length);
+  if(!n){ name.className = 'empty'; name.textContent = 'Valitse kokoonpano mallista'; st.innerHTML = ''; return; }
+  name.className = '';
+  if(n === 1){
+    name.textContent = selection[0].mark;
+    const p = PSETS.get(selection[0].guid);
+    if(p && p.props && p.props.asennettu){
+      const who = await memberName(p.modifiedBy); if(my !== renderSeq) return;
+      st.innerHTML = `<span class="dot" style="background:${esc(p.props.vari || PALETTE[0].hex)}"></span> Asennettu ${esc(fiTime(p.props.asennettuPvm || p.modifiedAt))}${who ? ' · ' + esc(who) : ''}`;
+    }else st.textContent = 'Ei kuitattu';
+  }else{
+    const marks = selection.slice(0, 6).map(p => p.mark).join(', ');
+    name.textContent = `${n} kokoonpanoa`;
+    st.textContent = `${marks}${n > 6 ? ' …' : ''}${signed.length ? ` · ${signed.length} jo kuitattu` : ''}`;
+  }
+  els('btnUndo').textContent = signed.length > 1 ? `Peru kuittaus (${signed.length})` : 'Peru kuittaus';
+}
+function renderSummary(){
+  const counts = new Map(); let total = 0;
+  PSETS.forEach(p => { if(p.props && p.props.asennettu){ total++; const h = (p.props.vari || PALETTE[0].hex).toLowerCase(); counts.set(h, (counts.get(h) || 0) + 1); } });
+  els('sumN').textContent = total;
+  els('chips').innerHTML = counts.size > 1 || (counts.size === 1 && !counts.has(PALETTE[0].hex))
+    ? [...counts].sort((a, b) => b[1] - a[1]).map(([h, c]) => `<span><span class="dot" style="background:${esc(h)}"></span>${c}</span>`).join('')
+    : '';
+}
+
+/* ---------------- wiring ---------------- */
+els('btnSetup').onclick = setup;
+els('btnSign').onclick = () => signOff(true);
+els('btnUndo').onclick = () => signOff(false);
+els('showColors').onchange = () => colorSync();
+els('btnRefresh').onclick = async () => {
+  try{ COLOR.rt.clear(); await loadAll(); toast('Päivitetty', 'ok'); }catch(e){ toast('Päivitys epäonnistui: ' + e.message, 'err'); }
+};
+start();
+</script>
+</body>
+</html>
